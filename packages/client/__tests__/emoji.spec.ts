@@ -1,5 +1,7 @@
-import { parseEmoji } from '../src/utils/markdown';
-import { emojiMaps } from './utils';
+import { describe, expect, it } from 'vitest';
+
+import { emojiMaps } from './__fixtures__/emojiMap.js';
+import { parseEmoji } from '../src/utils/markdown.js';
 
 describe('Emoji test', () => {
   it('Should not parse', () => {
@@ -16,14 +18,14 @@ describe('Emoji test', () => {
 
   it('Should parse emoji', () => {
     expect(
-      parseEmoji('Waline is a good framework. :bb_doge:', emojiMaps)
+      parseEmoji('Waline is a good framework. :bb_doge:', emojiMaps),
     ).toEqual(
-      'Waline is a good framework. <img class="vemoji" src="https://cdn.jsdelivr.net/gh/walinejs/emojis/bilibili/bb_doge.png" alt="bb_doge">'
+      'Waline is a good framework. <img class="wl-emoji" src="https://cdn.jsdelivr.net/gh/walinejs/emojis/bilibili/bb_doge.png" alt="bb_doge">',
     );
   });
 
   it('Should not throw errors', () => {
-    expect(parseEmoji());
-    expect(parseEmoji(''));
+    expect(() => parseEmoji()).not.toThrowError();
+    expect(() => parseEmoji('')).not.toThrowError();
   });
 });

@@ -1,4 +1,4 @@
-import { generateLocale } from './generate';
+import { generateLocale } from './generate.js';
 
 export default generateLocale([
   'Apelido',
@@ -10,6 +10,8 @@ export default generateLocale([
   'Comente aqui...',
   'Nenhum comentário, ainda.',
   'Enviar',
+  'Like',
+  'Cancel like',
   'Responder',
   'Cancelar resposta',
   'Comentários',
@@ -31,4 +33,21 @@ export default generateLocale([
   'Palavras',
   'Favor enviar comentário com $0 a $1 palavras!\n Número de palavras atuais: $2',
   'Anônimo',
+  'Dwarves',
+  'Hobbits',
+  'Ents',
+  'Wizards',
+  'Elves',
+  'Maiar',
+  'GIF',
+  'Pesquisar GIF',
+  'informação pessoal',
+  'Aprovado',
+  'Espera',
+  'Spam',
+  'Unsticky',
+  'Mais velho',
+  'Mais recentes',
+  'Mais quente',
+  'O que você acha?',
 ]);

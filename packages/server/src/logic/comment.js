@@ -1,15 +1,7 @@
-const Base = require('./base');
+const Base = require('./base.js');
+
 module.exports = class extends Base {
-  async __before() {
-    await super.__before();
-
-    const { type, path } = this.get();
-    const isAllowedGet = this.isGet && (type !== 'list' || path);
-
-    if (this.isPost || isAllowedGet) {
-      return;
-    }
-
+  checkAdmin() {
     const { userInfo } = this.ctx.state;
 
     if (think.isEmpty(userInfo)) {
@@ -22,13 +14,15 @@ module.exports = class extends Base {
   }
 
   /**
-   * @api {GET} /comment Get comment list for client
+   * @api {GET} /api/comment Get comment list for client
    * @apiGroup Comment
    * @apiVersion  0.0.1
    *
    * @apiParam  {String}  path  comment url path
    * @apiParam  {String}  page  page
-   * @apiParam  {String}  pagesize  page size
+   * @apiParam  {String}  pageSize  page size
+   * @apiParam  {String}  sortBy  comment sort type, one of 'insertedAt_desc', 'insertedAt_asc', 'like_desc'
+   * @apiParam  {String}  lang  language
    *
    * @apiSuccess  (200) {Number}  page return current comments list page
    * @apiSuccess  (200) {Number}  pageSize  to  return error message if error
@@ -54,12 +48,13 @@ module.exports = class extends Base {
    * @apiSuccess  (200) {String}  data.children.type comment login user type
    */
   /**
-   * @api {GET} /comment?type=list Get comment list for admin
+   * @api {GET} /api/comment?type=list Get comment list for admin
    * @apiGroup Comment
    * @apiVersion  0.0.1
    *
    * @apiParam  {String}  page  page
-   * @apiParam  {String}  pagesize  page size
+   * @apiParam  {String}  pageSize  page size
+   * @apiParam  {String}  lang  language
    *
    * @apiSuccess  (200) {Number}  errno 0
    * @apiSuccess  (200) {String}  errmsg  return error message if error
@@ -82,11 +77,12 @@ module.exports = class extends Base {
    * @apiSuccess  (200) {String}  data.data.url comment article link
    */
   /**
-   * @api {GET} /comment?type=count Get comment count for articles
+   * @api {GET} /api/comment?type=count Get comment count for articles
    * @apiGroup Comment
    * @apiVersion  0.0.1
    *
-   * @apiParam  {String}  url a array string join by comma just like `a` or `a,b`
+   * @apiParam  {String}  url a array string join by comma just like `a` or `a,b`, return site comment count if url empty
+   * @apiParam  {String}  lang  language
    *
    * @apiSuccessExample {Number} Single Path Response:
    * 300
@@ -94,11 +90,12 @@ module.exports = class extends Base {
    * [300, 100]
    */
   /**
-   * @api {GET} /comment?type=recent Get recent comments
+   * @api {GET} /api/comment?type=recent Get recent comments
    * @apiGroup Comment
    * @apiVersion  0.0.1
    *
    * @apiParam  {String}  count return comments number, default value is 10
+   * @apiParam  {String}  lang  language
    *
    * @apiSuccess  (200) {Object[]} response
    * @apiSuccess  (200) {String}  response.nick comment user nick name
@@ -112,7 +109,13 @@ module.exports = class extends Base {
    * @apiSuccess  (200) {String}  response.type comment login user type
    */
   getAction() {
-    const { type } = this.get();
+    const { type, path } = this.get();
+    const isAllowedGet = type !== 'list' || path;
+
+    if (!isAllowedGet) {
+      this.checkAdmin();
+    }
+
     switch (type) {
       case 'recent':
         this.rules = {
@@ -127,13 +130,13 @@ module.exports = class extends Base {
         this.rules = {
           url: {
             array: true,
-            required: true,
           },
         };
         break;
 
       case 'list': {
         const { userInfo } = this.ctx.state;
+
         if (userInfo.type !== 'administrator') {
           return this.fail();
         }
@@ -164,13 +167,17 @@ module.exports = class extends Base {
             int: { max: 100 },
             default: 10,
           },
+          sortBy: {
+            in: ['insertedAt_desc', 'insertedAt_asc', 'like_desc'],
+            default: 'insertedAt_desc',
+          },
         };
         break;
     }
   }
 
   /**
-   * @api {POST} /comment post comment
+   * @api {POST} /api/comment post comment
    * @apiGroup Comment
    * @apiVersion  0.0.1
    *
@@ -178,11 +185,12 @@ module.exports = class extends Base {
    * @apiParam  {String}  mail  post comment user mail address
    * @apiParam  {String}  link  post comment user link
    * @apiParam  {String}  comment  post comment text
-   * @apiParam  {String}  url  the artcile url path of comment
+   * @apiParam  {String}  url  the article url path of comment
    * @apiParam  {String}  ua  browser user agent
    * @apiParam  {String}  pid parent comment id
    * @apiParam  {String}  rid root comment id
    * @apiParam  {String}  at  parent comment user nick name
+   * @apiParam  {String}  lang  language
    *
    * @apiSuccess  (200) {Number}  errno 0
    * @apiSuccess  (200) {String}  errmsg  return error message if error
@@ -197,17 +205,34 @@ module.exports = class extends Base {
    * @apiSuccess  (200) {String}  data.avatar comment user avatar
    * @apiSuccess  (200) {String}  data.type comment login user type
    */
-  postAction() {
+  async postAction() {
     const { LOGIN } = process.env;
     const { userInfo } = this.ctx.state;
 
-    if (LOGIN === 'force' && think.isEmpty(userInfo)) {
+    this.rules = {
+      url: {
+        string: true,
+        required: true,
+      },
+      comment: {
+        string: true,
+        required: true,
+      },
+    };
+
+    if (!think.isEmpty(userInfo)) {
+      return;
+    }
+
+    if (LOGIN === 'force') {
       return this.ctx.throw(401);
     }
+
+    return this.useCaptchaCheck();
   }
 
   /**
-   * @api {POST} /comment/:id update comment data
+   * @api {PUT} /api/comment/:id update comment data
    * @apiGroup Comment
    * @apiVersion  0.0.1
    *
@@ -215,20 +240,76 @@ module.exports = class extends Base {
    * @apiParam  {String}  [mail]  post comment user mail address
    * @apiParam  {String}  [link]  post comment user link
    * @apiParam  {String}  [comment]  post comment text
-   * @apiParam  {String}  [url]  the artcile url path of comment
+   * @apiParam  {String}  [url]  the article url path of comment
+   * @apiParam  {Boolean} [like] like comment
+   * @apiParam  {String}  lang  language
    *
    * @apiSuccess  (200) {Number}  errno 0
    * @apiSuccess  (200) {String}  errmsg  return error message if error
    */
-  putAction() {}
+  async putAction() {
+    const { userInfo } = this.ctx.state;
+    const data = this.post();
+
+    // 1. like action
+    if (think.isBoolean(data.like) && Object.keys(data).toString() === 'like') {
+      return;
+    }
+
+    if (think.isEmpty(userInfo)) {
+      return this.ctx.throw(401);
+    }
+
+    // 2. administrator
+    if (userInfo.type === 'administrator') {
+      return;
+    }
+
+    // 3. comment author modify comment content
+    const modelInstance = this.getModel('Comment');
+    const commentData = await modelInstance.select({
+      user_id: userInfo.objectId,
+      objectId: this.id,
+    });
+
+    if (!think.isEmpty(commentData)) {
+      return;
+    }
+
+    return this.ctx.throw(403);
+  }
 
   /**
-   * @api {DELETE} /comment/:id delete comment
+   * @api {DELETE} /api/comment/:id delete comment
    * @apiGroup Comment
    * @apiVersion  0.0.1
    *
+   * @apiParam  {String}  lang  language
+   *
    * @apiSuccess  (200) {Number}  errno 0
    * @apiSuccess  (200) {String}  errmsg  return error message if error
    */
-  deleteAction() {}
+  async deleteAction() {
+    const { userInfo } = this.ctx.state;
+
+    if (think.isEmpty(userInfo)) {
+      return this.ctx.throw(401);
+    }
+
+    if (userInfo.type === 'administrator') {
+      return;
+    }
+
+    const modelInstance = this.getModel('Comment');
+    const commentData = await modelInstance.select({
+      user_id: userInfo.objectId,
+      objectId: this.id,
+    });
+
+    if (!think.isEmpty(commentData)) {
+      return;
+    }
+
+    return this.ctx.throw(403);
+  }
 };

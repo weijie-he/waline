@@ -1,10 +1,12 @@
-const Base = require('./base');
+const Base = require('./base.js');
 
 module.exports = class extends Base {
   /**
-   * @api {GET} /token  get login user info
+   * @api {GET} /api/token  get login user info
    * @apiGroup User
    * @apiVersion  0.0.1
+   *
+   * @apiParam  {String}  lang  language
    *
    * @apiSuccess  (200) {Number}  errno 0
    * @apiSuccess  (200) {String}  errmsg  return error message if error
@@ -22,22 +24,27 @@ module.exports = class extends Base {
   getAction() {}
 
   /**
-   * @api {POST} /token user login
+   * @api {POST} /api/token user login
    * @apiGroup User
    * @apiVersion  0.0.1
    *
    * @apiParam  {String}  email login user email
    * @apiParam  {String}  password login user password
+   * @apiParam  {String}  lang  language
    *
    * @apiSuccess  (200) {Number}  errno 0
    * @apiSuccess  (200) {String}  errmsg  return error message if error
    */
-  postAction() {}
+  postAction() {
+    return this.useCaptchaCheck();
+  }
 
   /**
-   * @api {DELETE} /token  user logout
+   * @api {DELETE} /api/token  user logout
    * @apiGroup User
    * @apiVersion  0.0.1
+   *
+   * @apiParam  {String}  lang  language
    *
    * @apiSuccess  (200) {Number}  errno 0
    * @apiSuccess  (200) {String}  errmsg  return error message if error

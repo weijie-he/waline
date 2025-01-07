@@ -1,36 +1,586 @@
+<script setup lang="ts">
+import { useDebounceFn, useEventListener } from '@vueuse/core';
+import type { WalineComment, WalineCommentData, UserInfo } from '@waline/api';
+import { addComment, login, updateComment } from '@waline/api';
+import autosize from 'autosize';
+import type { DeepReadonly } from 'vue';
+import {
+  computed,
+  inject,
+  nextTick,
+  onMounted,
+  reactive,
+  ref,
+  useTemplateRef,
+  watch,
+} from 'vue';
+
+import {
+  CloseIcon,
+  EmojiIcon,
+  GifIcon,
+  ImageIcon,
+  LoadingIcon,
+  MarkdownIcon,
+  PreviewIcon,
+} from './Icons.js';
+import ImageWall from './ImageWall.vue';
+import {
+  useEditor,
+  useReCaptcha,
+  useTurnstile,
+  useUserInfo,
+  useUserMeta,
+} from '../composables/index.js';
+import type {
+  WalineImageUploader,
+  WalineSearchOptions,
+  WalineSearchResult,
+} from '../typings/index.js';
+import type { WalineEmojiConfig } from '../utils/index.js';
+import {
+  getEmojis,
+  getImageFromDataTransfer,
+  getWordNumber,
+  isValidEmail,
+  parseEmoji,
+  parseMarkdown,
+  userAgent,
+} from '../utils/index.js';
+import { configKey } from '../config/index.js';
+
+const props = withDefaults(
+  defineProps<{
+    /**
+     * Current comment to be edited
+     */
+    edit?: WalineComment | null;
+    /**
+     * Root comment id
+     */
+    rootId?: string;
+    /**
+     * Comment id to be replied
+     */
+    replyId?: string;
+    /**
+     * User name to be replied
+     */
+    replyUser?: string;
+  }>(),
+  {
+    edit: null,
+    rootId: '',
+    replyId: '',
+    replyUser: '',
+  },
+);
+
+const emit = defineEmits<{
+  (event: 'log' | 'cancelEdit' | 'cancelReply'): void;
+  (event: 'submit', comment: WalineComment): void;
+}>();
+
+// eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+const config = inject(configKey)!;
+
+const editor = useEditor();
+const userMeta = useUserMeta();
+const userInfo = useUserInfo();
+
+const inputRefs = ref<Record<string, HTMLInputElement>>({});
+const textAreaRef = useTemplateRef<HTMLTextAreaElement>('textarea');
+const imageUploaderRef = useTemplateRef<HTMLInputElement>('image-uploader');
+const emojiButtonRef = useTemplateRef<HTMLDivElement>('emoji-button');
+const emojiPopupRef = useTemplateRef<HTMLDivElement>('emoji-popup');
+const gifButtonRef = useTemplateRef<HTMLDivElement>('gif-button');
+const gifPopupRef = useTemplateRef<HTMLDivElement>('gif-popup');
+const gifSearchRef = useTemplateRef<HTMLInputElement>('gif-search');
+
+const emoji = ref<DeepReadonly<WalineEmojiConfig>>({ tabs: [], map: {} });
+const emojiTabIndex = ref(0);
+const showEmoji = ref(false);
+const showGif = ref(false);
+const showPreview = ref(false);
+const previewText = ref('');
+const wordNumber = ref(0);
+
+const searchResults = reactive({
+  loading: true,
+  list: [] as WalineSearchResult,
+});
+
+const wordLimit = ref(0);
+const isWordNumberLegal = ref(false);
+
+const content = ref('');
+
+const isSubmitting = ref(false);
+
+const isImageListEnd = ref(false);
+
+const locale = computed(() => config.value.locale);
+
+const isLogin = computed(() => Boolean(userInfo.value.token));
+
+const canUploadImage = computed(() => config.value.imageUploader !== false);
+
+const insert = (content: string): void => {
+  // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+  const textArea = textAreaRef.value!;
+  const startPosition = textArea.selectionStart;
+  const endPosition = textArea.selectionEnd || 0;
+  const scrollTop = textArea.scrollTop;
+
+  editor.value =
+    textArea.value.substring(0, startPosition) +
+    content +
+    textArea.value.substring(endPosition, textArea.value.length);
+  textArea.focus();
+  textArea.selectionStart = startPosition + content.length;
+  textArea.selectionEnd = startPosition + content.length;
+  textArea.scrollTop = scrollTop;
+};
+
+const onKeyDown = (event: KeyboardEvent): void => {
+  if (isSubmitting.value) {
+    return;
+  }
+
+  const key = event.key;
+
+  // Shortcut key
+  if ((event.ctrlKey || event.metaKey) && key === 'Enter') void submitComment();
+};
+
+const uploadImage = (file: File): Promise<void> => {
+  const uploadText = `![${config.value.locale.uploading} ${file.name}]()`;
+
+  insert(uploadText);
+  isSubmitting.value = true;
+
+  return Promise.resolve()
+    .then(() => (config.value.imageUploader as WalineImageUploader)(file))
+    .then((url) => {
+      editor.value = editor.value.replace(
+        uploadText,
+        `\r\n![${file.name}](${url})`,
+      );
+    })
+    .catch((err: unknown) => {
+      alert((err as Error).message);
+      editor.value = editor.value.replace(uploadText, '');
+    })
+    .then(() => {
+      isSubmitting.value = false;
+    });
+};
+
+const onDrop = (event: DragEvent): void => {
+  if (event.dataTransfer?.items) {
+    const file = getImageFromDataTransfer(event.dataTransfer.items);
+
+    if (file && canUploadImage.value) {
+      void uploadImage(file);
+      event.preventDefault();
+    }
+  }
+};
+
+const onPaste = (event: ClipboardEvent): void => {
+  if (event.clipboardData) {
+    const file = getImageFromDataTransfer(event.clipboardData.items);
+
+    if (file && canUploadImage.value) void uploadImage(file);
+  }
+};
+
+const onChange = (): void => {
+  // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+  const inputElement = imageUploaderRef.value!;
+
+  if (inputElement.files && canUploadImage.value)
+    void uploadImage(inputElement.files[0]).then(() => {
+      // clear input so a same image can be uploaded later
+      inputElement.value = '';
+    });
+};
+
+const submitComment = async (): Promise<void> => {
+  const {
+    serverURL,
+    lang,
+    login,
+    wordLimit,
+    requiredMeta,
+    recaptchaV3Key,
+    turnstileKey,
+  } = config.value;
+
+  const comment: WalineCommentData = {
+    comment: content.value,
+    nick: userMeta.value.nick,
+    mail: userMeta.value.mail,
+    link: userMeta.value.link,
+    url: config.value.path,
+    ua: await userAgent(),
+  };
+
+  if (!props.edit) {
+    // https://github.com/walinejs/waline/issues/2163
+    if (userInfo.value.token) {
+      // login user
+      comment.nick = userInfo.value.display_name;
+      comment.mail = userInfo.value.email;
+      comment.link = userInfo.value.url;
+    } else {
+      if (login === 'force') return;
+
+      // check nick
+      if (requiredMeta.includes('nick') && !comment.nick) {
+        inputRefs.value.nick.focus();
+
+        alert(locale.value.nickError);
+
+        return;
+      }
+
+      // check mail
+      if (
+        (requiredMeta.includes('mail') && !comment.mail) ||
+        (comment.mail && !isValidEmail(comment.mail))
+      ) {
+        inputRefs.value.mail.focus();
+
+        alert(locale.value.mailError);
+
+        return;
+      }
+
+      if (!comment.nick) comment.nick = locale.value.anonymous;
+    }
+  }
+
+  // check comment
+  if (!comment.comment) {
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+    textAreaRef.value!.focus();
+
+    return;
+  }
+
+  if (!isWordNumberLegal.value) {
+    alert(
+      locale.value.wordHint
+        .replace('$0', (wordLimit as [number, number])[0].toString())
+        .replace('$1', (wordLimit as [number, number])[1].toString())
+        .replace('$2', wordNumber.value.toString()),
+    );
+
+    return;
+  }
+
+  comment.comment = parseEmoji(comment.comment, emoji.value.map);
+
+  if (props.replyId && props.rootId) {
+    comment.pid = props.replyId;
+    comment.rid = props.rootId;
+    comment.at = props.replyUser;
+  }
+
+  isSubmitting.value = true;
+
+  try {
+    if (recaptchaV3Key)
+      comment.recaptchaV3 =
+        await useReCaptcha(recaptchaV3Key).execute('social');
+
+    if (turnstileKey)
+      comment.turnstile = await useTurnstile(turnstileKey).execute('social');
+
+    const options = {
+      serverURL,
+      lang,
+      token: userInfo.value.token,
+      comment,
+    };
+
+    const response = await (props.edit
+      ? updateComment({
+          objectId: props.edit.objectId,
+          ...options,
+        })
+      : addComment(options));
+
+    isSubmitting.value = false;
+
+    if (response.errmsg) {
+      alert(response.errmsg);
+
+      return;
+    }
+
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+    emit('submit', response.data!);
+
+    editor.value = '';
+
+    previewText.value = '';
+
+    // ensure changes are applied to dom to avoid  https://github.com/walinejs/waline/issues/2371
+    await nextTick();
+
+    if (props.replyId) emit('cancelReply');
+    if (props.edit?.objectId) emit('cancelEdit');
+  } catch (err: unknown) {
+    isSubmitting.value = false;
+
+    alert((err as TypeError).message);
+  }
+};
+
+const onLogin = (event: Event): void => {
+  event.preventDefault();
+  const { lang, serverURL } = config.value;
+
+  void login({
+    serverURL,
+    lang,
+  }).then((data) => {
+    userInfo.value = data;
+    (data.remember ? localStorage : sessionStorage).setItem(
+      'WALINE_USER',
+      JSON.stringify(data),
+    );
+    emit('log');
+  });
+};
+
+const onLogout = (): void => {
+  userInfo.value = {};
+  localStorage.setItem('WALINE_USER', 'null');
+  sessionStorage.setItem('WALINE_USER', 'null');
+  emit('log');
+};
+
+const onProfile = (event: Event): void => {
+  event.preventDefault();
+
+  const { lang, serverURL } = config.value;
+
+  const width = 800;
+  const height = 800;
+  const left = (window.innerWidth - width) / 2;
+  const top = (window.innerHeight - height) / 2;
+  const query = new URLSearchParams({
+    lng: lang,
+    token: userInfo.value.token,
+  });
+  const handler = window.open(
+    `${serverURL}/ui/profile?${query.toString()}`,
+    '_blank',
+    `width=${width},height=${height},left=${left},top=${top},scrollbars=no,resizable=no,status=no,location=no,toolbar=no,menubar=no`,
+  );
+
+  handler?.postMessage({ type: 'TOKEN', data: userInfo.value.token }, '*');
+};
+
+const popupHandler = (event: MouseEvent): void => {
+  if (
+    !emojiButtonRef.value?.contains(event.target as Node) &&
+    !emojiPopupRef.value?.contains(event.target as Node)
+  )
+    showEmoji.value = false;
+
+  if (
+    !gifButtonRef.value?.contains(event.target as Node) &&
+    !gifPopupRef.value?.contains(event.target as Node)
+  )
+    showGif.value = false;
+};
+
+const onImageWallScroll = async (event: Event): Promise<void> => {
+  const { scrollTop, clientHeight, scrollHeight } =
+    event.target as HTMLDivElement;
+  const percent = (clientHeight + scrollTop) / scrollHeight;
+  const searchOptions = config.value.search as WalineSearchOptions;
+  const keyword = gifSearchRef.value?.value ?? '';
+
+  if (percent < 0.9 || searchResults.loading || isImageListEnd.value) return;
+
+  searchResults.loading = true;
+
+  const searchResult =
+    searchOptions.more && searchResults.list.length
+      ? await searchOptions.more(keyword, searchResults.list.length)
+      : await searchOptions.search(keyword);
+
+  if (searchResult.length)
+    searchResults.list = [
+      ...searchResults.list,
+      ...(searchOptions.more && searchResults.list.length
+        ? await searchOptions.more(keyword, searchResults.list.length)
+        : await searchOptions.search(keyword)),
+    ];
+  else isImageListEnd.value = true;
+
+  searchResults.loading = false;
+
+  setTimeout(() => {
+    (event.target as HTMLDivElement).scrollTop = scrollTop;
+  }, 50);
+};
+
+const onGifSearch = useDebounceFn((event: Event) => {
+  searchResults.list = [];
+  isImageListEnd.value = false;
+  void onImageWallScroll(event);
+}, 300);
+
+// update wordNumber
+watch(
+  [config, wordNumber],
+  ([config, wordNumber]) => {
+    const { wordLimit: limit } = config;
+
+    if (limit) {
+      if (wordNumber < limit[0] && limit[0] !== 0) {
+        wordLimit.value = limit[0];
+        isWordNumberLegal.value = false;
+      } else if (wordNumber > limit[1]) {
+        wordLimit.value = limit[1];
+        isWordNumberLegal.value = false;
+      } else {
+        wordLimit.value = limit[1];
+        isWordNumberLegal.value = true;
+      }
+    } else {
+      wordLimit.value = 0;
+      isWordNumberLegal.value = true;
+    }
+  },
+  { immediate: true },
+);
+
+useEventListener('click', popupHandler);
+useEventListener(
+  'message',
+  ({ data }: { data: { type: 'profile'; data: UserInfo } }) => {
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+    if (!data || data.type !== 'profile') return;
+
+    userInfo.value = { ...userInfo.value, ...data.data };
+
+    [localStorage, sessionStorage]
+      .filter((store) => store.getItem('WALINE_USER'))
+      .forEach((store) => {
+        store.setItem('WALINE_USER', JSON.stringify(userInfo));
+      });
+  },
+);
+
+// watch gif
+watch(showGif, async (showGif) => {
+  if (!showGif) return;
+
+  const searchOptions = config.value.search as WalineSearchOptions;
+
+  // clear input
+  if (gifSearchRef.value) gifSearchRef.value.value = '';
+
+  searchResults.loading = true;
+
+  searchResults.list = await (searchOptions.default?.() ??
+    searchOptions.search(''));
+
+  searchResults.loading = false;
+});
+
+onMounted(() => {
+  if (props.edit?.objectId) {
+    editor.value = props.edit.orig;
+  }
+
+  // watch editor
+  watch(
+    () => editor.value,
+    (value) => {
+      const { highlighter, texRenderer } = config.value;
+
+      content.value = value;
+      previewText.value = parseMarkdown(value, {
+        emojiMap: emoji.value.map,
+        highlighter,
+        texRenderer,
+      });
+      wordNumber.value = getWordNumber(value);
+
+      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+      if (value) autosize(textAreaRef.value!);
+      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion, import-x/no-named-as-default-member
+      else autosize.destroy(textAreaRef.value!);
+    },
+    { immediate: true },
+  );
+
+  // watch emoji value change
+  watch(
+    () => config.value.emoji,
+    (emojiConfig) =>
+      getEmojis(emojiConfig).then((config) => {
+        emoji.value = config;
+      }),
+    { immediate: true },
+  );
+});
+</script>
+
 <template>
-  <div class="vcomment">
-    <div v-if="config.login !== 'disable' && isLogin" class="vlogin-info">
-      <div class="vavatar">
-        <button class="vlogout-btn" :title="locale.logout" @click="onLogout">
-          <CloseIcon size="14" />
+  <div :key="userInfo.token" class="wl-comment">
+    <div
+      v-if="config.login !== 'disable' && isLogin && !edit?.objectId"
+      class="wl-login-info"
+    >
+      <div class="wl-avatar">
+        <button
+          type="submit"
+          class="wl-logout-btn"
+          :title="locale.logout"
+          @click="onLogout"
+        >
+          <CloseIcon :size="14" />
         </button>
 
-        <img
-          :src="
-            userInfo.avatar ||
-            `${config.avatar.cdn}${userInfo.mailMd5}${config.avatar.param}`
-          "
-          alt="avatar"
-        />
+        <a
+          href="#"
+          class="wl-login-nick"
+          aria-label="Profile"
+          :title="locale.profile"
+          @click="onProfile"
+        >
+          <img :src="userInfo.avatar" alt="avatar" />
+        </a>
       </div>
+
       <a
         href="#"
-        class="vlogin-nick"
+        class="wl-login-nick"
         aria-label="Profile"
+        :title="locale.profile"
         @click="onProfile"
         v-text="userInfo.display_name"
       />
     </div>
 
-    <div class="vpanel">
+    <div class="wl-panel">
       <div
         v-if="config.login !== 'force' && config.meta.length && !isLogin"
-        :class="['vheader', `vheader-${config.meta.length}`]"
+        class="wl-header"
+        :class="`item${config.meta.length}`"
       >
-        <div v-for="kind in config.meta" class="vheader-item" :key="kind">
+        <div v-for="kind in config.meta" :key="kind" class="wl-header-item">
           <label
-            :for="kind"
+            :for="`wl-${kind}`"
             v-text="
               locale[kind] +
               (config.requiredMeta.includes(kind) || !config.requiredMeta.length
@@ -38,67 +588,84 @@
                 : `(${locale.optional})`)
             "
           />
+
           <input
+            :id="`wl-${kind}`"
             :ref="
               (element) => {
-                if (element) inputRefs[kind] = element;
+                if (element) inputRefs[kind] = element as HTMLInputElement;
               }
             "
-            :id="`waline-${kind}`"
-            :class="['vinput', `v${kind}`]"
+            v-model="userMeta[kind]"
+            class="wl-input"
+            :class="`wl-${kind}`"
             :name="kind"
             :type="kind === 'mail' ? 'email' : 'text'"
-            v-model="inputs[kind]"
           />
         </div>
       </div>
 
       <textarea
-        class="veditor"
-        ref="editorRef"
-        id="waline-edit"
+        id="wl-edit"
+        ref="textarea"
+        v-model="editor"
+        class="wl-editor"
         :placeholder="replyUser ? `@${replyUser}` : locale.placeholder"
-        v-model="inputs.editor"
         @keydown="onKeyDown"
         @drop="onDrop"
         @paste="onPaste"
       />
 
-      <div
-        class="vpreview"
-        :style="{ display: showPreview ? 'block' : 'none' }"
-      >
+      <div v-show="showPreview" class="wl-preview">
+        <hr />
+
         <h4>{{ locale.preview }}:</h4>
-        <div class="vcontent" v-html="previewText" />
+        <!-- eslint-disable-next-line vue/no-v-html -->
+        <div class="wl-content" v-html="previewText" />
       </div>
 
-      <div class="vfooter">
-        <div class="vactions">
+      <div class="wl-footer">
+        <div class="wl-actions">
           <a
             href="https://guides.github.com/features/mastering-markdown/"
             title="Markdown Guide"
             aria-label="Markdown is supported"
-            class="vaction"
+            class="wl-action"
             target="_blank"
-            rel="noreferrer"
+            rel="noopener noreferrer"
           >
             <MarkdownIcon />
           </a>
 
           <button
-            ref="emojiButtonRef"
-            class="vaction"
-            :class="{ actived: showEmoji }"
+            v-show="emoji.tabs.length"
+            ref="emoji-button"
+            type="button"
+            class="wl-action"
+            :class="{ active: showEmoji }"
             :title="locale.emoji"
             @click="showEmoji = !showEmoji"
           >
             <EmojiIcon />
           </button>
 
+          <button
+            v-if="config.search"
+            ref="gif-button"
+            type="button"
+            class="wl-action"
+            :class="{ active: showGif }"
+            :title="locale.gif"
+            @click="showGif = !showGif"
+          >
+            <GifIcon />
+          </button>
+
           <input
-            ref="imageUploadRef"
+            id="wl-image-upload"
+            ref="image-uploader"
             class="upload"
-            id="waline-image-upload"
+            aria-hidden="true"
             type="file"
             accept=".png,.jpg,.jpeg,.webp,.bmp,.gif"
             @change="onChange"
@@ -106,16 +673,18 @@
 
           <label
             v-if="canUploadImage"
-            for="waline-image-upload"
-            class="vaction"
+            for="wl-image-upload"
+            class="wl-action"
             :title="locale.uploadImage"
+            :aria-label="locale.uploadImage"
           >
             <ImageIcon />
           </label>
 
           <button
-            class="vaction"
-            :class="{ actived: showPreview }"
+            type="button"
+            class="wl-action"
+            :class="{ active: showPreview }"
             :title="locale.preview"
             @click="showPreview = !showPreview"
           >
@@ -123,8 +692,10 @@
           </button>
         </div>
 
-        <div class="vinfo">
-          <div class="vtext-number">
+        <div class="wl-info">
+          <div class="wl-captcha-container" />
+
+          <div class="wl-text-number">
             {{ wordNumber }}
 
             <span v-if="config.wordLimit">
@@ -140,41 +711,70 @@
 
           <button
             v-if="config.login !== 'disable' && !isLogin"
-            class="vbtn"
+            type="button"
+            class="wl-btn"
             @click="onLogin"
             v-text="locale.login"
           />
 
           <button
             v-if="config.login !== 'force' || isLogin"
-            class="vbtn primary"
+            type="submit"
+            class="primary wl-btn"
             title="Cmd|Ctrl + Enter"
             :disabled="isSubmitting"
             @click="submitComment"
           >
             <LoadingIcon v-if="isSubmitting" :size="16" />
+
             <template v-else>
               {{ locale.submit }}
             </template>
           </button>
         </div>
 
+        <div ref="gif-popup" class="wl-gif-popup" :class="{ display: showGif }">
+          <input
+            ref="gif-search"
+            type="text"
+            :placeholder="locale.gifSearchPlaceholder"
+            @input="onGifSearch"
+          />
+
+          <ImageWall
+            v-if="searchResults.list.length"
+            :items="searchResults.list"
+            :column-width="200"
+            :gap="6"
+            @insert="insert($event)"
+            @scroll="onImageWallScroll"
+          />
+
+          <div v-if="searchResults.loading" class="wl-loading">
+            <LoadingIcon :size="30" />
+          </div>
+        </div>
+
         <div
-          ref="emojiPopupRef"
-          class="vemoji-popup"
+          ref="emoji-popup"
+          class="wl-emoji-popup"
           :class="{ display: showEmoji }"
         >
-          <template v-for="(config, index) in emoji.tabs" :key="config.name">
-            <div v-if="index === emojiTabIndex" class="vtab-wrapper">
+          <template
+            v-for="(emojiItem, index) in emoji.tabs"
+            :key="emojiItem.name"
+          >
+            <div v-if="index === emojiTabIndex" class="wl-tab-wrapper">
               <button
-                v-for="key in config.items"
+                v-for="key in emojiItem.items"
                 :key="key"
+                type="button"
                 :title="key"
                 @click="insert(`:${key}:`)"
               >
                 <img
                   v-if="showEmoji"
-                  class="vemoji"
+                  class="wl-emoji"
                   :src="emoji.map[key]"
                   :alt="key"
                   loading="lazy"
@@ -183,19 +783,21 @@
               </button>
             </div>
           </template>
-          <div v-if="emoji.tabs.length > 1" class="vtabs">
+
+          <div v-if="emoji.tabs.length > 1" class="wl-tabs">
             <button
-              v-for="(config, index) in emoji.tabs"
-              :key="config.name"
-              class="vtab"
+              v-for="(emojiItem, index) in emoji.tabs"
+              :key="emojiItem.name"
+              type="button"
+              class="wl-tab"
               :class="{ active: emojiTabIndex === index }"
               @click="emojiTabIndex = index"
             >
               <img
-                class="vemoji"
-                :src="config.icon"
-                :alt="config.name"
-                :title="config.name"
+                class="wl-emoji"
+                :src="emojiItem.icon"
+                :alt="emojiItem.name"
+                :title="emojiItem.name"
                 loading="lazy"
                 referrerPolicy="no-referrer"
               />
@@ -206,470 +808,13 @@
     </div>
 
     <button
-      v-if="replyId"
-      class="vclose"
+      v-if="replyId || edit?.objectId"
+      type="button"
+      class="wl-close"
       :title="locale.cancelReply"
-      @click="$emit('cancel-reply')"
+      @click="replyId ? emit('cancelReply') : emit('cancelEdit')"
     >
-      <CloseIcon size="24" />
+      <CloseIcon :size="24" />
     </button>
   </div>
 </template>
-
-<script lang="ts">
-import {
-  computed,
-  defineComponent,
-  inject,
-  onMounted,
-  onUnmounted,
-  ref,
-  watch,
-} from 'vue';
-import autosize from 'autosize';
-
-import {
-  CloseIcon,
-  EmojiIcon,
-  ImageIcon,
-  MarkdownIcon,
-  PreviewIcon,
-  LoadingIcon,
-} from './Icons';
-import { useInputs, useUserInfo } from '../composables';
-import {
-  getImagefromDataTransfer,
-  parseMarkdown,
-  getWordNumber,
-  parseEmoji,
-  postComment,
-} from '../utils';
-
-import type { DeepReadonly } from 'vue';
-import type { ConfigRef } from '../composables';
-import type { UploadImage } from '../config';
-import type { CommentData } from '../typings';
-import type { EmojiConfig } from '../utils';
-
-export default defineComponent({
-  name: 'CommentBox',
-
-  components: {
-    CloseIcon,
-    EmojiIcon,
-    ImageIcon,
-    MarkdownIcon,
-    PreviewIcon,
-    LoadingIcon,
-  },
-
-  props: {
-    rootId: {
-      type: String,
-      default: '',
-    },
-    replyId: {
-      type: String,
-      default: '',
-    },
-    replyUser: {
-      type: String,
-      default: '',
-    },
-  },
-
-  emits: ['submit', 'cancel-reply'],
-
-  setup(props, { emit }) {
-    const config = inject<ConfigRef>('config') as ConfigRef;
-
-    const { inputs, store } = useInputs();
-    const { userInfo, setUserInfo } = useUserInfo();
-
-    const inputRefs = ref<Record<string, HTMLInputElement>>({});
-    const editorRef = ref<HTMLTextAreaElement | null>(null);
-    const imageUploadRef = ref<HTMLInputElement | null>(null);
-    const emojiButtonRef = ref<HTMLDivElement | null>(null);
-    const emojiPopupRef = ref<HTMLDivElement | null>(null);
-
-    const emoji = ref<DeepReadonly<EmojiConfig>>({ tabs: [], map: {} });
-    const emojiTabIndex = ref(0);
-    const showEmoji = ref(false);
-    const showPreview = ref(false);
-    const previewText = ref('');
-    const wordNumber = ref(0);
-
-    const wordLimit = ref(0);
-    const isWordNumberLegal = ref(false);
-
-    const content = ref('');
-
-    const isSubmitting = ref(false);
-
-    const locale = computed(() => config.value.locale);
-
-    const isLogin = computed(() => Boolean(userInfo.value?.token));
-
-    const canUploadImage = computed(() => config.value.uploadImage !== false);
-
-    const insert = (content: string): void => {
-      const textArea = editorRef.value as HTMLTextAreaElement;
-      const startPosition = textArea.selectionStart;
-      const endPosition = textArea.selectionEnd || 0;
-      const scrollTop = textArea.scrollTop;
-
-      inputs.editor =
-        textArea.value.substring(0, startPosition) +
-        content +
-        textArea.value.substring(endPosition, textArea.value.length);
-      textArea.focus();
-      textArea.selectionStart = startPosition + content.length;
-      textArea.selectionEnd = startPosition + content.length;
-      textArea.scrollTop = scrollTop;
-    };
-
-    const onKeyDown = (event: KeyboardEvent): void => {
-      const key = event.key;
-
-      // Shortcut key
-      if ((event.ctrlKey || event.metaKey) && key === 'Enter') submitComment();
-    };
-
-    const uploadImage = (file: File): Promise<void> => {
-      const uploadText = `![${config.value.locale.uploading} ${file.name}]()`;
-
-      insert(uploadText);
-
-      return Promise.resolve()
-        .then(() => (config.value.uploadImage as UploadImage)(file))
-        .then((url) => {
-          inputs.editor = inputs.editor.replace(
-            uploadText,
-            `\r\n![${file.name}](${url})`
-          );
-        });
-    };
-
-    const onDrop = (event: DragEvent): void => {
-      if (event.dataTransfer?.items) {
-        const file = getImagefromDataTransfer(event.dataTransfer.items);
-
-        if (file && canUploadImage.value) {
-          uploadImage(file);
-          event.preventDefault();
-        }
-      }
-    };
-
-    const onPaste = (event: ClipboardEvent): void => {
-      if (event.clipboardData) {
-        const file = getImagefromDataTransfer(event.clipboardData.items);
-
-        if (file && canUploadImage.value) uploadImage(file);
-      }
-    };
-
-    const onChange = (): void => {
-      const inputElement = imageUploadRef.value as HTMLInputElement;
-
-      if (inputElement.files && canUploadImage.value)
-        uploadImage(inputElement.files[0]).then(() => {
-          // clear input so a same image can be uploaded later
-          inputElement.value = '';
-        });
-    };
-
-    const submitComment = (): void => {
-      const { serverURL, lang, login, wordLimit, requiredMeta } = config.value;
-
-      const comment: CommentData = {
-        comment: content.value,
-        nick: inputs.nick,
-        mail: inputs.mail,
-        link: inputs.link,
-        ua: navigator.userAgent,
-        url: config.value.path,
-      };
-
-      if (userInfo.value?.token) {
-        // login user
-
-        comment.nick = userInfo.value.display_name;
-        comment.mail = userInfo.value.email;
-        comment.link = userInfo.value.url;
-      } else {
-        if (login === 'force') return;
-
-        // check nick
-        if (
-          (requiredMeta.indexOf('nick') > -1 || comment.nick) &&
-          !comment.nick
-        ) {
-          inputRefs.value.nick?.focus();
-          return alert(locale.value.nickError);
-        }
-
-        // check mail
-        if (requiredMeta.indexOf('mail') > -1 && !comment.mail) {
-          inputRefs.value.mail?.focus();
-          return alert(locale.value.mailError);
-        }
-
-        // check comment
-        if (!comment.comment) {
-          editorRef.value?.focus();
-          return;
-        }
-
-        if (!comment.nick) comment.nick = locale.value.anonymous;
-      }
-
-      if (!isWordNumberLegal.value)
-        return alert(
-          locale.value.wordHint
-            .replace('$0', (wordLimit as [number, number])[0].toString())
-            .replace('$1', (wordLimit as [number, number])[1].toString())
-            .replace('$2', wordNumber.value.toString())
-        );
-
-      comment.comment = parseEmoji(comment.comment, emoji.value.map);
-
-      if (props.replyId && props.rootId) {
-        comment.pid = props.replyId;
-        comment.rid = props.rootId;
-        comment.at = props.replyUser;
-      }
-
-      isSubmitting.value = true;
-
-      postComment({
-        serverURL,
-        lang,
-        token: userInfo.value?.token,
-        comment,
-      })
-        .then((resp) => {
-          isSubmitting.value = false;
-
-          store.update({
-            nick: comment.nick,
-            link: comment.link,
-            mail: comment.mail,
-          });
-
-          if (resp.errmsg) return alert(resp.errmsg);
-
-          emit('submit', resp.data);
-
-          inputs.editor = '';
-
-          previewText.value = '';
-
-          if (props.replyId) emit('cancel-reply');
-        })
-        .catch((err: TypeError) => {
-          isSubmitting.value = false;
-
-          alert(err.message);
-        });
-    };
-
-    const onLogin = (event: Event): void => {
-      event.preventDefault();
-      const { lang, serverURL } = config.value;
-
-      const width = 450;
-      const height = 450;
-      const left = (window.innerWidth - width) / 2;
-      const top = (window.innerHeight - height) / 2;
-
-      const handler = window.open(
-        `${serverURL}/ui/login?lng=${encodeURIComponent(lang)}`,
-        '_blank',
-        `width=${width},height=${height},left=${left},top=${top},scrollbars=no,resizable=no,status=no,location=no,toolbar=no,menubar=no`
-      );
-
-      handler?.postMessage({ type: 'TOKEN', data: null }, '*');
-
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const receiver = ({ data }: any): void => {
-        if (!data || data.type !== 'userInfo') return;
-
-        if (data.data.token) {
-          handler?.close();
-          setUserInfo(data.data);
-          (data.data.remember ? localStorage : sessionStorage).setItem(
-            'WALINE_USER',
-            JSON.stringify(data.data)
-          );
-
-          window.removeEventListener('message', receiver);
-        }
-      };
-
-      window.addEventListener('message', receiver);
-    };
-
-    const onLogout = (): void => {
-      setUserInfo({});
-      localStorage.setItem('WALINE_USER', 'null');
-      sessionStorage.setItem('WALINE_USER', 'null');
-    };
-
-    const onProfile = (event: Event): void => {
-      event.preventDefault();
-
-      const { lang, serverURL } = config.value;
-
-      const width = 800;
-      const height = 800;
-      const left = (window.innerWidth - width) / 2;
-      const top = (window.innerHeight - height) / 2;
-      const handler = window.open(
-        `${serverURL}/ui/profile?lng=${encodeURIComponent(lang)}`,
-        '_blank',
-        `width=${width},height=${height},left=${left},top=${top},scrollbars=no,resizable=no,status=no,location=no,toolbar=no,menubar=no`
-      );
-
-      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-      handler?.postMessage({ type: 'TOKEN', data: userInfo.value!.token }, '*');
-
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const receiver = ({ data }: any): void => {
-        if (!data || data.type !== 'profile') return;
-
-        setUserInfo(Object.assign({}, userInfo.value, data));
-        [localStorage, sessionStorage]
-          .filter((store) => store.getItem('WALINE_USER'))
-          .forEach((store) =>
-            store.setItem('WALINE_USER', JSON.stringify(userInfo))
-          );
-        window.removeEventListener('message', receiver);
-      };
-
-      window.addEventListener('message', receiver);
-    };
-
-    const popupHandler = (event: MouseEvent): void => {
-      if (
-        !(emojiButtonRef.value as HTMLElement).contains(event.target as Node) &&
-        !(emojiPopupRef.value as HTMLElement).contains(event.target as Node)
-      )
-        showEmoji.value = false;
-    };
-
-    // watch editor
-    watch(
-      () => inputs.editor,
-      (value) => {
-        const { highlight, tex } = config.value;
-
-        content.value = value;
-        previewText.value = parseMarkdown(
-          value,
-          highlight,
-          emoji.value.map,
-          tex
-        );
-        wordNumber.value = getWordNumber(value);
-
-        if (editorRef.value)
-          if (value) autosize(editorRef.value);
-          else autosize.destroy(editorRef.value);
-      },
-      { immediate: true }
-    );
-
-    // watch emoji value change
-    watch(
-      () => config.value.emoji,
-      (emojiConfig) =>
-        emojiConfig.then((config) => {
-          emoji.value = config;
-        }),
-      { immediate: true }
-    );
-
-    // update wordNumber
-    watch(
-      [config, wordNumber],
-      ([config, wordNumber]) => {
-        const { wordLimit: limit } = config;
-
-        if (limit) {
-          if (wordNumber < limit[0] && limit[0] !== 0) {
-            wordLimit.value = limit[0];
-            isWordNumberLegal.value = false;
-          } else if (wordNumber > limit[1]) {
-            wordLimit.value = limit[1];
-            isWordNumberLegal.value = false;
-          } else {
-            wordLimit.value = limit[1];
-            isWordNumberLegal.value = true;
-          }
-        } else {
-          wordLimit.value = 0;
-          isWordNumberLegal.value = true;
-        }
-      },
-      { immediate: true }
-    );
-
-    onMounted(() => {
-      document.body.addEventListener('click', popupHandler);
-    });
-
-    onUnmounted(() => {
-      document.body.removeEventListener('click', popupHandler);
-    });
-
-    return {
-      // config
-      config,
-      locale,
-
-      // events
-      insert,
-      onChange,
-      onDrop,
-      onKeyDown,
-      onPaste,
-      onLogin,
-      onLogout,
-      onProfile,
-      submitComment,
-
-      isLogin,
-      userInfo,
-      isSubmitting,
-
-      // word
-      wordNumber,
-      wordLimit,
-      isWordNumberLegal,
-
-      // inputs
-      inputs,
-
-      // emoji
-      emoji,
-      emojiTabIndex,
-      showEmoji,
-
-      // image
-      canUploadImage,
-
-      // preview
-      previewText,
-      showPreview,
-
-      // ref
-      inputRefs,
-      editorRef,
-      emojiButtonRef,
-      emojiPopupRef,
-      imageUploadRef,
-    };
-  },
-});
-</script>

@@ -1,4 +1,4 @@
-import { generateLocale } from './generate';
+import { generateLocale } from './generate.js';
 
 export default generateLocale([
   '昵称',
@@ -10,6 +10,8 @@ export default generateLocale([
   '欢迎评论',
   '来发评论吧~',
   '提交',
+  '喜欢',
+  '取消喜欢',
   '回复',
   '取消回复',
   '评论',
@@ -31,4 +33,21 @@ export default generateLocale([
   '字',
   '评论字数应在 $0 到 $1 字之间！\n当前字数：$2',
   '匿名',
+  '潜水',
+  '冒泡',
+  '吐槽',
+  '活跃',
+  '话痨',
+  '传说',
+  '表情包',
+  '搜索表情包',
+  '个人资料',
+  '通过',
+  '待审核',
+  '垃圾',
+  '取消置顶',
+  '按倒序',
+  '按正序',
+  '按热度',
+  '你认为这篇文章怎么样？',
 ]);

@@ -1,6 +1,7 @@
 ---
 title: FAQ
 icon: faq
+order: 4
 ---
 
 Waline has a very clear position since its birth:
@@ -48,15 +49,11 @@ Go to the corresponding GitHub repository and modify the version number of `@wal
 
 ![vercel](./assets/vercel-update.png)
 
-#### Deta
-
-[Deta - How to update?](../guide/server/deta.md#how-to-update)
-
 #### CloudBase
 
 Enter the code editing page, click <kbd>Save and reinstall dependencies</kbd>. If it still doesn’t work, enter <kbd>My Application</kbd> and select <kbd>Deploy</kbd> to redeploy.
 
-::: danger
+::: caution
 
 Redeployment will clear the previous files. If there is a configuration in the previous file, it needs to be backed up first.
 
@@ -71,107 +68,3 @@ Run `docker pull lizheming/waline` directly to pull the latest image.
 ## Why posting comments are slow?
 
 Due to some technical reasons, spam detection and comment notification are all serial operations when posting comments. The spam detection uses the service provided by Akismet abroad, which may be slow to access. Users can turn off the spam detection function through the `AKISMET_KEY=false` environment variable. Beside the spam detection service, the email notification in the comment notification may also cause a timeout. You can turn off the comment notification to test whether it is caused by this feature.
-
-## How to add lightbox effects?
-
-There has many plugin can implement it. Here we give a simple example for [lightGallery](https://www.lightgalleryjs.com/), [Slimbox2](https://www.digitalia.be/software/slimbox2/), [lightbox2](https://lokeshdhakar.com/projects/lightbox2/) and [Fancybox](https://fancyapps.com/docs/ui/fancybox/).
-
-### LightGallery
-
-Insert following code before `<head>` tag in your html content. `#waline-coment` is your Waline comment element selector, you need replace it by yourself.
-
-```html
-<link
-  rel="stylesheet"
-  href="https://cdn.jsdelivr.net/npm/lightgallery@2.1.5/css/lightgallery-bundle.css"
-/>
-<script src="https://cdn.jsdelivr.net/npm/lightgallery@2.1.5/lightgallery.umd.min.js"></script>
-<script>
-  document.addEventListener('click', (e) => {
-    const imgs = [].slice
-      .call(document.querySelectorAll('#waline-comment .vcontent img'))
-      .filter((img) => img.width > 20);
-
-    if (imgs.indexOf(e.target) === -1) {
-      return;
-    }
-    if (!e.target.gallery) {
-      e.target.gallery = window.lightGallery(e.target.parentNode);
-    }
-    e.target.gallery.openGallery(0);
-  });
-</script>
-```
-
-### Slimbox2
-
-Insert following code before `<head>` tag in your html content. `#waline-coment` is your Waline comment element selector, you need replace it by yourself.
-
-```html
-<link
-  rel="stylesheet"
-  href="https://cdn.jsdelivr.net/gh/cbeyls/slimbox/css/slimbox2.css"
-/>
-<script src="https://cdn.jsdelivr.net/npm/jquery@1.12.4/dist/jquery.min.js"></script>
-<script src="https://cdn.jsdelivr.net/gh/cbeyls/slimbox/js/slimbox2.js"></script>
-<script>
-  document.addEventListener('click', (e) => {
-    const imgs = [].slice
-      .call(document.querySelectorAll('#waline-comment .vcontent img'))
-      .filter((img) => img.width > 20);
-
-    const idx = imgs.indexOf(e.target);
-    if (idx === -1) {
-      return;
-    }
-
-    $.slimbox(e.target.src, e.target.alt, {});
-  });
-</script>
-```
-
-### Lightbox2
-
-Insert following code before `<head>` tag in your html content. `#waline-coment` is your Waline comment element selector, you need replace it by yourself.
-
-```html
-<link
-  rel="stylesheet"
-  href="https://cdn.jsdelivr.net/npm/lightbox2@2.11.3/dist/css/lightbox.min.css"
-/>
-<script src="https://cdn.jsdelivr.net/npm/lightbox2@2.11.3/dist/js/lightbox-plus-jquery.min.js"></script>
-<script>
-  document.addEventListener('click', (e) => {
-    const lightbox = new Lightbox();
-    const imgs = [].slice
-      .call(document.querySelectorAll('#waline-comment .vcontent img'))
-      .filter((img) => img.width > 20);
-
-    if (imgs.indexOf(e.target) === -1) {
-      return;
-    }
-
-    const $link = $('<a />', {
-      href: e.target.src,
-      'data-title': e.target.alt,
-      rel: 'lightbox',
-    });
-    lightbox.start($link);
-  });
-</script>
-```
-
-### Fancybox
-
-Insert following code before `<head>` tag in your html content. `#waline-coment` is your Waline comment element selector, you need replace it by yourself.
-
-```html
-<script src="https://cdn.jsdelivr.net/npm/@fancyapps/ui/dist/fancybox.umd.js"></script>
-<link
-  rel="stylesheet"
-  href="https://cdn.jsdelivr.net/npm/@fancyapps/ui/dist/fancybox.css"
-/>
-<script>
-  Fancybox.bind('#waline-comment .vcontent img');
-</script>
-```

@@ -1,10 +1,15 @@
+const crypto = require('node:crypto');
+
+const FormData = require('form-data');
+const fetch = require('node-fetch');
 const nodemailer = require('nodemailer');
 const nunjucks = require('nunjucks');
-const request = require('request-promise-native');
-module.exports = class extends think.Service {
-  constructor(...args) {
-    super(...args);
 
+module.exports = class extends think.Service {
+  constructor(ctx) {
+    super(ctx);
+
+    this.ctx = ctx;
     const {
       SMTP_USER,
       SMTP_PASS,
@@ -13,16 +18,18 @@ module.exports = class extends think.Service {
       SMTP_SECURE,
       SMTP_SERVICE,
     } = process.env;
+
     if (SMTP_HOST || SMTP_SERVICE) {
       const config = {
         auth: { user: SMTP_USER, pass: SMTP_PASS },
       };
+
       if (SMTP_SERVICE) {
         config.service = SMTP_SERVICE;
       } else {
         config.host = SMTP_HOST;
         config.port = parseInt(SMTP_PORT);
-        config.secure = SMTP_SECURE !== 'false';
+        config.secure = SMTP_SECURE && SMTP_SECURE !== 'false';
       }
       this.transporter = nodemailer.createTransport(config);
     }
@@ -48,8 +55,9 @@ module.exports = class extends think.Service {
         postUrl: SITE_URL + self.url + '#' + self.objectId,
       },
     };
-    title = nunjucks.renderString(title, data);
-    content = nunjucks.renderString(content, data);
+
+    title = this.ctx.locale(title, data);
+    content = this.ctx.locale(content, data);
 
     return this.transporter.sendMail({
       from:
@@ -64,6 +72,7 @@ module.exports = class extends think.Service {
 
   async wechat({ title, content }, self, parent) {
     const { SC_KEY, SITE_NAME, SITE_URL } = process.env;
+
     if (!SC_KEY) {
       return false;
     }
@@ -77,22 +86,34 @@ module.exports = class extends think.Service {
         postUrl: SITE_URL + self.url + '#' + self.objectId,
       },
     };
-    title = nunjucks.renderString(title, data);
-    content = nunjucks.renderString(content, data);
 
-    return request({
-      uri: `https://sctapi.ftqq.com/${SC_KEY}.send`,
+    const contentWechat =
+      think.config('SCTemplate') ||
+      `{{site.name|safe}} 有新评论啦
+【评论者昵称】：{{self.nick}}
+【评论者邮箱】：{{self.mail}} 
+【内容】：{{self.comment}}
+【地址】：{{site.postUrl}}`;
+
+    title = this.ctx.locale(title, data);
+    content = this.ctx.locale(contentWechat, data);
+
+    const form = new FormData();
+
+    form.append('text', title);
+    form.append('desp', content);
+
+    return fetch(`https://sctapi.ftqq.com/${SC_KEY}.send`, {
       method: 'POST',
-      form: {
-        text: title,
-        desp: content,
-      },
-      json: true,
-    });
+      headers: form.getHeaders(),
+      body: form,
+    }).then((resp) => resp.json());
   }
 
   async qywxAmWechat({ title, content }, self, parent) {
-    const { QYWX_AM, SITE_NAME, SITE_URL } = process.env;
+    const { QYWX_AM, QYWX_PROXY, QYWX_PROXY_PORT, SITE_NAME, SITE_URL } =
+      process.env;
+
     if (!QYWX_AM) {
       return false;
     }
@@ -116,6 +137,7 @@ module.exports = class extends think.Service {
         postUrl: SITE_URL + self.url + '#' + self.objectId,
       },
     };
+
     const contentWechat =
       think.config('WXTemplate') ||
       `💬 {{site.name|safe}}的文章《{{postName}}》有新评论啦 
@@ -124,50 +146,66 @@ module.exports = class extends think.Service {
 【内容】：{{self.comment}} 
 <a href='{{site.postUrl}}'>查看详情</a>`;
 
-    title = nunjucks.renderString(title, data);
-    const desp = nunjucks.renderString(contentWechat, data);
+    title = this.ctx.locale(title, data);
+    const desp = this.ctx.locale(contentWechat, data);
+
     content = desp.replace(/\n/g, '<br/>');
 
-    const { access_token } = await request({
-      uri: `https://qyapi.weixin.qq.com/cgi-bin/gettoken`,
-      qs: {
-        corpid: `${QYWX_AM_AY[0]}`,
-        corpsecret: `${QYWX_AM_AY[1]}`,
-      },
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      json: true,
-    });
-    return request({
-      url: `https://qyapi.weixin.qq.com/cgi-bin/message/send?access_token=${access_token}`,
-      body: {
-        touser: `${QYWX_AM_AY[2]}`,
-        agentid: `${QYWX_AM_AY[3]}`,
-        msgtype: 'mpnews',
-        mpnews: {
-          articles: [
-            {
-              title,
-              thumb_media_id: `${QYWX_AM_AY[4]}`,
-              author: `Waline Comment`,
-              content_source_url: `${data.site.postUrl}`,
-              content: `${content}`,
-              digest: `${desp}`,
-            },
-          ],
+    const querystring = new URLSearchParams();
+
+    querystring.set('corpid', `${QYWX_AM_AY[0]}`);
+    querystring.set('corpsecret', `${QYWX_AM_AY[1]}`);
+
+    let baseUrl = 'https://qyapi.weixin.qq.com';
+
+    if (QYWX_PROXY) {
+      if (!QYWX_PROXY_PORT) {
+        baseUrl = `http://${QYWX_PROXY}`;
+      } else {
+        baseUrl = `http://${QYWX_PROXY}:${QYWX_PROXY_PORT}`;
+      }
+    }
+
+    const { access_token } = await fetch(
+      `${baseUrl}/cgi-bin/gettoken?${querystring.toString()}`,
+      {
+        headers: {
+          'content-type': 'application/json',
         },
       },
-      method: 'POST',
-      json: true,
-      headers: {
-        'Content-Type': 'application/json',
+    ).then((resp) => resp.json());
+
+    return fetch(
+      `${baseUrl}/cgi-bin/message/send?access_token=${access_token}`,
+      {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          touser: `${QYWX_AM_AY[2]}`,
+          agentid: `${QYWX_AM_AY[3]}`,
+          msgtype: 'mpnews',
+          mpnews: {
+            articles: [
+              {
+                title,
+                thumb_media_id: `${QYWX_AM_AY[4]}`,
+                author: `Waline Comment`,
+                content_source_url: `${data.site.postUrl}`,
+                content: `${content}`,
+                digest: `${desp}`,
+              },
+            ],
+          },
+        }),
       },
-    });
+    ).then((resp) => resp.json());
   }
 
   async qq(self, parent) {
-    const { QMSG_KEY, QQ_ID, SITE_NAME, SITE_URL } = process.env;
+    const { QMSG_KEY, QQ_ID, SITE_NAME, SITE_URL, QMSG_HOST } = process.env;
+
     if (!QMSG_KEY) {
       return false;
     }
@@ -196,26 +234,34 @@ module.exports = class extends think.Service {
 {{self.comment}}
 仅供预览评论，请前往上述页面查看完整內容。`;
 
-    return request({
-      uri: `https://qmsg.zendee.cn/send/${QMSG_KEY}`,
+    const form = new FormData();
+
+    form.append('msg', this.ctx.locale(contentQQ, data));
+    form.append('qq', QQ_ID);
+
+    const qmsgHost = QMSG_HOST
+      ? QMSG_HOST.replace(/\/$/, '')
+      : 'https://qmsg.zendee.cn';
+
+    return fetch(`${qmsgHost}/send/${QMSG_KEY}`, {
       method: 'POST',
-      form: {
-        msg: nunjucks.renderString(contentQQ, data),
-        qq: QQ_ID,
-      },
-    });
+      header: form.getHeaders(),
+      body: form,
+    }).then((resp) => resp.json());
   }
 
   async telegram(self, parent) {
     const { TG_BOT_TOKEN, TG_CHAT_ID, SITE_NAME, SITE_URL } = process.env;
+
     if (!TG_BOT_TOKEN || !TG_CHAT_ID) {
       return false;
     }
 
     let commentLink = '';
     const href = self.comment.match(/<a href="(.*?)">(.*?)<\/a>/g);
+
     if (href !== null) {
-      for (var i = 0; i < href.length; i++) {
+      for (let i = 0; i < href.length; i++) {
         href[i] =
           '[Link: ' +
           href[i].replace(/<a href="(.*?)">(.*?)<\/a>/g, '$2') +
@@ -261,16 +307,24 @@ module.exports = class extends think.Service {
       },
     };
 
-    return request({
-      uri: `https://api.telegram.org/bot${TG_BOT_TOKEN}/sendMessage`,
-      method: 'POST',
-      form: {
-        text: nunjucks.renderString(contentTG, data),
-        chat_id: TG_CHAT_ID,
-        parse_mode: 'MarkdownV2',
+    const form = new FormData();
+
+    form.append('text', this.ctx.locale(contentTG, data));
+    form.append('chat_id', TG_CHAT_ID);
+    form.append('parse_mode', 'MarkdownV2');
+
+    const resp = await fetch(
+      `https://api.telegram.org/bot${TG_BOT_TOKEN}/sendMessage`,
+      {
+        method: 'POST',
+        header: form.getHeaders(),
+        body: form,
       },
-      json: true,
-    });
+    ).then((resp) => resp.json());
+
+    if (!resp.ok) {
+      console.log('Telegram Notification Failed:' + JSON.stringify(resp));
+    }
   }
 
   async pushplus({ title, content }, self, parent) {
@@ -298,106 +352,210 @@ module.exports = class extends think.Service {
         postUrl: SITE_URL + self.url + '#' + self.objectId,
       },
     };
-    title = nunjucks.renderString(title, data);
-    content = nunjucks.renderString(content, data);
 
-    return request({
-      uri: `http://www.pushplus.plus/send/${PUSH_PLUS_KEY}`,
+    title = this.ctx.locale(title, data);
+    content = this.ctx.locale(content, data);
+
+    const form = new FormData();
+
+    if (topic) form.append('topic', topic);
+    if (template) form.append('template', template);
+    if (channel) form.append('channel', channel);
+    if (webhook) form.append('webhook', webhook);
+    if (callbackUrl) form.append('callbackUrl', callbackUrl);
+    if (title) form.append('title', title);
+    if (content) form.append('content', content);
+
+    return fetch(`http://www.pushplus.plus/send/${PUSH_PLUS_KEY}`, {
       method: 'POST',
-      form: {
-        title,
-        content,
-        topic,
-        template,
-        channel,
-        webhook,
-        callbackUrl,
+      header: form.getHeaders(),
+      body: form,
+    }).then((resp) => resp.json());
+  }
+
+  async discord({ title, content }, self, parent) {
+    const { DISCORD_WEBHOOK, SITE_NAME, SITE_URL } = process.env;
+
+    if (!DISCORD_WEBHOOK) {
+      return false;
+    }
+
+    const data = {
+      self,
+      parent,
+      site: {
+        name: SITE_NAME,
+        url: SITE_URL,
+        postUrl: SITE_URL + self.url + '#' + self.objectId,
       },
-      json: true,
-    });
+    };
+
+    title = this.ctx.locale(title, data);
+    content = this.ctx.locale(
+      think.config('DiscordTemplate') ||
+        `💬 {{site.name|safe}} 有新评论啦 
+    【评论者昵称】：{{self.nick}}
+    【评论者邮箱】：{{self.mail}} 
+    【内容】：{{self.comment}} 
+    【地址】：{{site.postUrl}}`,
+      data,
+    );
+
+    const form = new FormData();
+
+    form.append('content', `${title}\n${content}`);
+
+    return fetch(DISCORD_WEBHOOK, {
+      method: 'POST',
+      header: form.getHeaders(),
+      body: form,
+    }).then((resp) => resp.statusText);
+    // Expected return value: No Content
+    // Since Discord doesn't return any response body on success, we just return the status text.
+  }
+
+  async lark({ title, content }, self, parent) {
+    const { LARK_WEBHOOK, LARK_SECRET, SITE_NAME, SITE_URL } = process.env;
+
+    if (!LARK_WEBHOOK) {
+      return false;
+    }
+
+    self.comment = self.comment.replace(/(<([^>]+)>)/gi, '');
+
+    const data = {
+      self,
+      parent,
+      site: {
+        name: SITE_NAME,
+        url: SITE_URL,
+        postUrl: SITE_URL + self.url + '#' + self.objectId,
+      },
+    };
+
+    content = nunjucks.renderString(
+      think.config('LarkTemplate') ||
+        `【网站名称】：{{site.name|safe}} \n【评论者昵称】：{{self.nick}}\n【评论者邮箱】：{{self.mail}}\n【内容】：{{self.comment}}【地址】：{{site.postUrl}}`,
+      data,
+    );
+
+    const post = {
+      en_us: {
+        title: this.ctx.locale(title, data),
+        content: [
+          [
+            {
+              tag: 'text',
+              text: content,
+            },
+          ],
+        ],
+      },
+    };
+
+    let signData = {};
+    const msg = {
+      msg_type: 'post',
+      content: {
+        post,
+      },
+    };
+
+    const sign = (timestamp, secret) => {
+      const signStr = timestamp + '\n' + secret;
+
+      return crypto.createHmac('sha256', signStr).update('').digest('base64');
+    };
+
+    if (LARK_SECRET) {
+      const timestamp = parseInt(+new Date() / 1000);
+
+      signData = { timestamp: timestamp, sign: sign(timestamp, LARK_SECRET) };
+    }
+
+    const resp = await fetch(LARK_WEBHOOK, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        ...signData,
+        ...msg,
+      }),
+    }).then((resp) => resp.json());
+
+    if (resp.status !== 200) {
+      console.log('Lark Notification Failed:' + JSON.stringify(resp));
+    }
+
+    console.log('FeiShu Notification Success:' + JSON.stringify(resp));
   }
 
   async run(comment, parent, disableAuthorNotify = false) {
-    const { AUTHOR_EMAIL, BLOGGER_EMAIL } = process.env;
+    const { AUTHOR_EMAIL, DISABLE_AUTHOR_NOTIFY } = process.env;
     const { mailSubject, mailTemplate, mailSubjectAdmin, mailTemplateAdmin } =
       think.config();
-    const AUTHOR = AUTHOR_EMAIL || BLOGGER_EMAIL;
+    const AUTHOR = AUTHOR_EMAIL;
 
     const mailList = [];
     const isAuthorComment = AUTHOR
-      ? comment.mail.toLowerCase() === AUTHOR.toLowerCase()
+      ? (comment.mail || '').toLowerCase() === AUTHOR.toLowerCase()
       : false;
     const isReplyAuthor = AUTHOR
-      ? parent && parent.mail.toLowerCase() === AUTHOR.toLowerCase()
+      ? parent && (parent.mail || '').toLowerCase() === AUTHOR.toLowerCase()
       : false;
+    const isCommentSelf =
+      parent &&
+      (parent.mail || '').toLowerCase() === (comment.mail || '').toLowerCase();
 
-    const title = mailSubjectAdmin || '{{site.name | safe}} 上有新评论了';
-    const content =
-      mailTemplateAdmin ||
-      `
-    <div style="border-top:2px solid #12ADDB;box-shadow:0 1px 3px #AAAAAA;line-height:180%;padding:0 15px 12px;margin:50px auto;font-size:12px;">
-      <h2 style="border-bottom:1px solid #DDD;font-size:14px;font-weight:normal;padding:13px 0 10px 8px;">
-        您在<a style="text-decoration:none;color: #12ADDB;" href="{{site.url}}" target="_blank">{{site.name}}</a>上的文章有了新的评论
-      </h2>
-      <p><strong>{{self.nick}}</strong>回复说：</p>
-      <div style="background-color: #f5f5f5;padding: 10px 15px;margin:18px 0;word-wrap:break-word;">
-        {{self.comment | safe}}
-      </div>
-      <p>您可以点击<a style="text-decoration:none; color:#12addb" href="{{site.postUrl}}" target="_blank">查看回复的完整內容</a></p>
-      <br/>
-    </div>`;
+    const title = mailSubjectAdmin || 'MAIL_SUBJECT_ADMIN';
+    const content = mailTemplateAdmin || 'MAIL_TEMPLATE_ADMIN';
 
-    if (!isAuthorComment && !disableAuthorNotify) {
+    if (!DISABLE_AUTHOR_NOTIFY && !isAuthorComment && !disableAuthorNotify) {
       const wechat = await this.wechat({ title, content }, comment, parent);
       const qywxAmWechat = await this.qywxAmWechat(
         { title, content },
         comment,
-        parent
+        parent,
       );
       const qq = await this.qq(comment, parent);
       const telegram = await this.telegram(comment, parent);
       const pushplus = await this.pushplus({ title, content }, comment, parent);
-      console.log(pushplus);
+      const discord = await this.discord({ title, content }, comment, parent);
+      const lark = await this.lark({ title, content }, comment, parent);
+
       if (
-        [wechat, qq, telegram, qywxAmWechat, pushplus].every(think.isEmpty) &&
-        !isReplyAuthor
+        [wechat, qq, telegram, qywxAmWechat, pushplus, discord, lark].every(
+          think.isEmpty,
+        )
       ) {
         mailList.push({ to: AUTHOR, title, content });
       }
     }
 
-    const disallowList = ['github', 'twitter', 'facebook'].map(
-      (social) => 'mail.' + social
+    const disallowList = ['github', 'twitter', 'facebook', 'qq', 'weibo'].map(
+      (social) => 'mail.' + social,
     );
     const fakeMail = new RegExp(`@(${disallowList.join('|')})$`, 'i');
-    if (parent && !fakeMail.test(parent.mail) && comment.status !== 'waiting') {
+
+    if (
+      parent &&
+      !fakeMail.test(parent.mail) &&
+      !isCommentSelf &&
+      !isReplyAuthor &&
+      comment.status !== 'waiting'
+    ) {
       mailList.push({
         to: parent.mail,
-        title:
-          mailSubject ||
-          '{{parent.nick | safe}}，『{{site.name | safe}}』上的评论收到了回复',
-        content:
-          mailTemplate ||
-          `
-        <div style="border-top:2px solid #12ADDB;box-shadow:0 1px 3px #AAAAAA;line-height:180%;padding:0 15px 12px;margin:50px auto;font-size:12px;">
-          <h2 style="border-bottom:1px solid #DDD;font-size:14px;font-weight:normal;padding:13px 0 10px 8px;">        
-            您在<a style="text-decoration:none;color: #12ADDB;" href="{{site.url}}" target="_blank">{{site.name}}</a>上的评论有了新的回复
-          </h2>
-          {{parent.nick}} 同学，您曾发表评论：
-          <div style="padding:0 12px 0 12px;margin-top:18px">
-            <div style="background-color: #f5f5f5;padding: 10px 15px;margin:18px 0;word-wrap:break-word;">{{parent.comment | safe}}</div>
-            <p><strong>{{self.nick}}</strong>回复说：</p>
-            <div style="background-color: #f5f5f5;padding: 10px 15px;margin:18px 0;word-wrap:break-word;">{{self.comment | safe}}</div>
-            <p>您可以点击<a style="text-decoration:none; color:#12addb" href="{{site.postUrl}}" target="_blank">查看回复的完整內容</a>，欢迎再次光临<a style="text-decoration:none; color:#12addb" href="{{site.url}}" target="_blank">{{site.name}}</a>。</p>
-            <br/>
-          </div>
-        </div>`,
+        title: mailSubject || 'MAIL_SUBJECT',
+        content: mailTemplate || 'MAIL_TEMPLATE',
       });
     }
 
-    for (let i = 0; i < mailList.length; i++) {
+    for (const mail of mailList) {
       try {
-        const response = await this.mail(mailList[i], comment, parent);
+        const response = await this.mail(mail, comment, parent);
+
         console.log('Notification mail send success: %s', response);
       } catch (e) {
         console.log('Mail send fail:', e);

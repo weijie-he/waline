@@ -1,15 +1,13 @@
 const jwt = require('jsonwebtoken');
+const speakeasy = require('speakeasy');
 const helper = require('think-helper');
-const { PasswordHash } = require('phpass');
-const BaseRest = require('./rest');
+
+const BaseRest = require('./rest.js');
 
 module.exports = class extends BaseRest {
   constructor(...args) {
     super(...args);
-    this.modelInstance = this.service(
-      `storage/${this.config('storage')}`,
-      'Users'
-    );
+    this.modelInstance = this.getModel('Users');
   }
 
   getAction() {
@@ -17,30 +15,47 @@ module.exports = class extends BaseRest {
   }
 
   async postAction() {
-    const { email, password } = this.post();
+    const { email, password, code } = this.post();
     const user = await this.modelInstance.select({ email });
 
     if (think.isEmpty(user) || /^verify:/i.test(user[0].type)) {
       return this.fail();
     }
 
-    const checkPassword = new PasswordHash().checkPassword(
-      password,
-      user[0].password
-    );
+    const checkPassword = this.checkPassword(password, user[0].password);
 
     if (!checkPassword) {
       return this.fail();
     }
 
-    let avatar = user[0].avatar;
+    const twoFactorAuthSecret = user[0]['2fa'];
 
-    if (/(github)/i.test(avatar)) {
-      avatar =
-        this.config('avatarProxy') + '?url=' + encodeURIComponent(avatar);
+    if (twoFactorAuthSecret) {
+      const verified = speakeasy.totp.verify({
+        secret: twoFactorAuthSecret,
+        encoding: 'base32',
+        token: code,
+        window: 2,
+      });
+
+      if (!verified) {
+        return this.fail();
+      }
     }
 
-    user[0].avatar = avatar;
+    let avatarUrl = user[0].avatar
+      ? user[0].avatar
+      : await think.service('avatar').stringify({
+          mail: user[0].email,
+          nick: user[0].display_name,
+          link: user[0].url,
+        });
+    const { avatarProxy } = think.config();
+
+    if (avatarProxy) {
+      avatarUrl = avatarProxy + '?url=' + encodeURIComponent(avatarUrl);
+    }
+    user[0].avatar = avatarUrl;
 
     return this.success({
       ...user[0],

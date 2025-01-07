@@ -1,5 +1,6 @@
-const os = require('os');
-const path = require('path');
+const os = require('node:os');
+const path = require('node:path');
+
 const Application = require('thinkjs');
 const Loader = require('thinkjs/lib/loader');
 
@@ -14,6 +15,7 @@ const instance = new Application({
 
 module.exports = function (config = {}) {
   const loader = new Loader(instance.options);
+
   loader.loadAll('worker');
 
   for (const k in config) {

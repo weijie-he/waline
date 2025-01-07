@@ -1,15 +1,16 @@
 /*
- * Test if potential opening or closing delimieter
+ * Test if potential opening or closing delimiter
  * Assumes that there is a "$" at state.src[pos]
  */
 const isValidDelim = (state, pos) => {
   const prevChar = pos > 0 ? state.src.charAt(pos - 1) : '';
   const nextChar = pos + 1 <= state.posMax ? state.src.charAt(pos + 1) : '';
+
   return {
     canOpen: nextChar !== ' ' && nextChar !== '\t',
     /*
      * Check non-whitespace conditions for opening and closing, and
-     * check that closing delimeter isn’t followed by a number
+     * check that closing delimiter isn’t followed by a number
      */
     canClose: !(
       prevChar === ' ' ||
@@ -19,7 +20,7 @@ const isValidDelim = (state, pos) => {
   };
 };
 
-const inlineTex = (state, silent) => {
+const inlineTeX = (state, silent) => {
   let match;
   let pos;
   let res;
@@ -31,13 +32,14 @@ const inlineTex = (state, silent) => {
   if (!res.canOpen) {
     if (!silent) state.pending += '$';
     state.pos += 1;
+
     return true;
   }
   /*
-   * First check for and bypass all properly escaped delimieters
+   * First check for and bypass all properly escaped delimiters
    * This loop will assume that the first leading backtick can not
    * be the first character in state.src, which is known since
-   * we have found an opening delimieter already.
+   * we have found an opening delimiter already.
    */
   const start = state.pos + 1;
 
@@ -54,10 +56,11 @@ const inlineTex = (state, silent) => {
     match += 1;
   }
 
-  // No closing delimter found.  Consume $ and continue.
+  // No closing delimiter found.  Consume $ and continue.
   if (match === -1) {
     if (!silent) state.pending += '$';
     state.pos = start;
+
     return true;
   }
 
@@ -65,6 +68,7 @@ const inlineTex = (state, silent) => {
   if (match - start === 0) {
     if (!silent) state.pending += '$$';
     state.pos = start + 1;
+
     return true;
   }
 
@@ -74,11 +78,12 @@ const inlineTex = (state, silent) => {
   if (!res.canClose) {
     if (!silent) state.pending += '$';
     state.pos = start;
+
     return true;
   }
 
   if (!silent) {
-    token = state.push('inlineTex', 'math', 0);
+    token = state.push('inlineTeX', 'math', 0);
     token.markup = '$';
     token.content = state.src.slice(start, match);
   }
@@ -88,7 +93,7 @@ const inlineTex = (state, silent) => {
   return true;
 };
 
-const blockTex = (state, start, end, silent) => {
+const blockTeX = (state, start, end, silent) => {
   let firstLine;
   let lastLine;
   let next;
@@ -128,7 +133,7 @@ const blockTex = (state, start, end, silent) => {
 
   state.line = next + 1;
 
-  const token = state.push('blockTex', 'math', 0);
+  const token = state.push('blockTeX', 'math', 0);
 
   token.block = true;
   token.content =
@@ -146,6 +151,6 @@ const blockTex = (state, start, end, silent) => {
 };
 
 module.exports = {
-  inlineTex,
-  blockTex,
+  inlineTeX,
+  blockTeX,
 };

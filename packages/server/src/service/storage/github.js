@@ -1,7 +1,9 @@
-const path = require('path');
+const path = require('node:path');
+
 const { parseString, writeToString } = require('fast-csv');
-const request = require('request-promise-native');
-const Base = require('./base');
+const fetch = require('node-fetch');
+
+const Base = require('./base.js');
 
 const CSV_HEADERS = {
   Comment: [
@@ -30,6 +32,7 @@ const CSV_HEADERS = {
     'type',
     'url',
     'avatar',
+    'label',
     'github',
     'twitter',
     'facebook',
@@ -49,23 +52,27 @@ class Github {
 
   // content api can only get file < 1MB
   async get(filename) {
-    const resp = await request({
-      uri:
-        'https://api.github.com/repos/' +
+    const resp = await fetch(
+      'https://api.github.com/repos/' +
         path.join(this.repo, 'contents', filename),
-      headers: {
-        Accept: 'application/vnd.github.v3+json',
-        Authorization: 'token ' + this.token,
-        'User-Agent': 'Waline',
+      {
+        headers: {
+          accept: 'application/vnd.github.v3+json',
+          authorization: 'token ' + this.token,
+          'user-agent': 'Waline',
+        },
       },
-      json: true,
-    }).catch((e) => {
-      const isTooLarge = e.message.includes('"too_large"');
-      if (!isTooLarge) {
-        throw e;
-      }
-      return this.getLargeFile(filename);
-    });
+    )
+      .then((resp) => resp.json())
+      .catch((e) => {
+        const isTooLarge = e.message.includes('"too_large"');
+
+        if (!isTooLarge) {
+          throw e;
+        }
+
+        return this.getLargeFile(filename);
+      });
 
     return {
       data: Buffer.from(resp.content, 'base64').toString('utf-8'),
@@ -75,54 +82,55 @@ class Github {
 
   // blob api can get file larger than 1MB
   async getLargeFile(filename) {
-    const { tree } = await request({
-      uri:
-        'https://api.github.com/repos/' +
+    const { tree } = await fetch(
+      'https://api.github.com/repos/' +
         path.join(this.repo, 'git/trees/HEAD') +
         '?recursive=1',
-      headers: {
-        Accept: 'application/vnd.github.v3+json',
-        Authorization: 'token ' + this.token,
-        'User-Agent': 'Waline',
+      {
+        headers: {
+          accept: 'application/vnd.github.v3+json',
+          authorization: 'token ' + this.token,
+          'user-agent': 'Waline',
+        },
       },
-      json: true,
-    });
+    ).then((resp) => resp.json());
 
     const file = tree.find(({ path }) => path === filename);
+
     if (!file) {
       const error = new Error('NOT FOUND');
+
       error.statusCode = 404;
       throw error;
     }
 
-    return request({
-      uri: file.url,
+    return fetch(file.url, {
       headers: {
-        Accept: 'application/vnd.github.v3+json',
-        Authorization: 'token ' + this.token,
-        'User-Agent': 'Waline',
+        accept: 'application/vnd.github.v3+json',
+        authorization: 'token ' + this.token,
+        'user-agent': 'Waline',
       },
-      json: true,
-    });
+    }).then((resp) => resp.json());
   }
 
   async set(filename, content, { sha }) {
-    return request({
-      uri:
-        'https://api.github.com/repos/' +
+    return fetch(
+      'https://api.github.com/repos/' +
         path.join(this.repo, 'contents', filename),
-      method: 'PUT',
-      headers: {
-        Accept: 'application/vnd.github.v3+json',
-        Authorization: 'token ' + this.token,
-        'User-Agent': 'Waline',
+      {
+        method: 'PUT',
+        headers: {
+          accept: 'application/vnd.github.v3+json',
+          authorization: 'token ' + this.token,
+          'user-agent': 'Waline',
+        },
+        body: JSON.stringify({
+          sha,
+          message: 'feat(waline): update comment data',
+          content: Buffer.from(content, 'utf-8').toString('base64'),
+        }),
       },
-      body: JSON.stringify({
-        sha,
-        message: 'feat(waline): update comment data',
-        content: Buffer.from(content, 'utf-8').toString('base64'),
-      }),
-    });
+    );
   }
 }
 
@@ -132,6 +140,7 @@ module.exports = class extends Base {
     this.tableName = tableName;
 
     const { GITHUB_TOKEN, GITHUB_REPO, GITHUB_PATH } = process.env;
+
     this.git = new Github(GITHUB_REPO, GITHUB_TOKEN);
     this.basePath = GITHUB_PATH;
   }
@@ -147,7 +156,9 @@ module.exports = class extends Base {
 
     return new Promise((resolve, reject) => {
       const data = [];
+
       data.sha = file.sha;
+
       return parseString(file.data, {
         headers: file ? true : CSV_HEADERS[tableName],
       })
@@ -163,16 +174,19 @@ module.exports = class extends Base {
       headers: sha ? true : CSV_HEADERS[tableName],
       writeHeaders: true,
     });
+
     return this.git.set(filename, csv, { sha });
   }
 
   parseWhere(where) {
     const _where = [];
+
     if (think.isEmpty(where)) {
       return _where;
     }
 
     const filters = [];
+
     for (let k in where) {
       if (k === '_complex') {
         continue;
@@ -194,6 +208,7 @@ module.exports = class extends Base {
       }
 
       const handler = where[k][0].toUpperCase();
+
       switch (handler) {
         case 'IN':
           filters.push((item) => where[k][1].includes(item[k]));
@@ -205,6 +220,7 @@ module.exports = class extends Base {
           const first = where[k][1][0];
           const last = where[k][1].slice(-1);
           let reg;
+
           if (first === '%' && last === '%') {
             reg = new RegExp(where[k][1].slice(1, -1));
           } else if (first === '%') {
@@ -239,6 +255,7 @@ module.exports = class extends Base {
       or: Array.prototype.some,
     };
     const filters = [];
+
     for (const k in where._complex) {
       if (k === '_logic') {
         continue;
@@ -248,21 +265,25 @@ module.exports = class extends Base {
     }
 
     const logicFn = logicMap[where._complex._logic];
+
     return data.filter((item) =>
-      logicFn.call(filters, (filter) => filter.every((fn) => fn(item)))
+      logicFn.call(filters, (filter) => filter.every((fn) => fn(item))),
     );
   }
 
   async select(where, { desc, limit, offset, field } = {}) {
     const instance = await this.collection(this.tableName);
     let data = this.where(instance, where);
+
     if (desc) {
       data.sort((a, b) => {
         if (['insertedAt', 'createdAt', 'updatedAt'].includes(desc)) {
           const aTime = new Date(a[desc]).getTime();
           const bTime = new Date(b[desc]).getTime();
+
           return bTime - aTime;
         }
+
         return a[desc] - b[desc];
       });
     }
@@ -271,14 +292,17 @@ module.exports = class extends Base {
     if (field) {
       field.push('id');
       const fieldObj = {};
+
       field.forEach((f) => (fieldObj[f] = true));
       data = data.map((item) => {
         const ret = {};
+
         for (const k in item) {
           if (fieldObj[k]) {
             ret[k] = item[k];
           }
         }
+
         return ret;
       });
     }
@@ -286,23 +310,43 @@ module.exports = class extends Base {
     return data.map(({ id, ...cmt }) => ({ ...cmt, objectId: id }));
   }
 
-  // eslint-disable-next-line no-unused-vars
-  async count(where = {}, options = {}) {
+  async count(where = {}, { group } = {}) {
     const instance = await this.collection(this.tableName);
     const data = this.where(instance, where);
-    return data.length;
+
+    if (!group) {
+      return data.length;
+    }
+
+    const counts = {};
+
+    // FIXME: The loop is weird @lizheming
+    // eslint-disable-next-line @typescript-eslint/prefer-for-of
+    for (let i = 0; i < data.length; i++) {
+      const key = group.map((field) => data[field]).join();
+
+      if (!counts[key]) {
+        counts[key] = { count: 0 };
+        group.forEach((field) => {
+          counts[key][field] = data[field];
+        });
+      }
+      counts[key].count += 1;
+    }
+
+    return Object.keys(counts);
   }
 
   async add(
     data,
-    // eslint-disable-next-line no-unused-vars
-    { access: { read = true, write = true } = { read: true, write: true } } = {}
+    // { access: { read = true, write = true } = { read: true, write: true } } = {}
   ) {
     const instance = await this.collection(this.tableName);
     const id = Math.random().toString(36).substr(2, 15);
 
     instance.push({ ...data, id });
     await this.save(this.tableName, instance, instance.sha);
+
     return { ...data, objectId: id };
   }
 
@@ -322,6 +366,7 @@ module.exports = class extends Base {
       }
     });
     await this.save(this.tableName, instance, instance.sha);
+
     return list;
   }
 
@@ -330,6 +375,7 @@ module.exports = class extends Base {
     const deleteData = this.where(instance, where);
     const deleteId = deleteData.map(({ id }) => id);
     const data = instance.filter((data) => !deleteId.includes(data.id));
+
     await this.save(this.tableName, data, instance.sha);
   }
 };

@@ -1,6 +1,7 @@
 ---
 title: Intro
 icon: intro
+order: 1
 ---
 
 ::: info Waline
@@ -18,20 +19,20 @@ A simple comment system with backend support fork from [Valine](https://valine.j
 - Support for full markdown syntax
 - Simple and lightweight
 - Deploy free!
-- Multiple deploy and storage service support, at least 84 deploy style choice!
+- Multiple deploy and storage service support, at least 243 deploy style choice!
 
-  |                                                          | Waline                                   |                                                                               |
-  | -------------------------------------------------------- | ---------------------------------------- | ----------------------------------------------------------------------------- |
-  | **Client**                                               | **Server**                               | **Storage**                                                                   |
-  | [@waline/client](https://waline.js.org)                  | [Vercel](https://vercel.com)             | [LeanCloud](https://leancloud.app)                                            |
-  | [MiniValine](https://minivaline.js.org/)                 | [Deta](https://deta.sh)                  | [CloudBase](https://clodbase.net)                                             |
-  | [AprilComment](https://github.com/asforest/AprilComment) | [CloudBase](https://cloudbase.net/)      | [MongoDB](https://mongodb.com)                                                |
-  |                                                          | [InspireCloud](https://inspirecloud.com) | MySQL                                                                         |
-  |                                                          | [Railway](https://railway.app)           | SQLite                                                                        |
-  |                                                          | [Render](https://render.com)             | PostgreSQL                                                                    |
-  |                                                          | Docker                                   | [GitHub](https://github.com)                                                  |
-  |                                                          | Virtual Host                             | [Deta Base](https://docs.deta.sh/docs/base/about)                             |
-  |                                                          |                                          | [InspireCloud](https://inspirecloud.com/docs/nodejs/database/quickstart.html) |
+|                                                 | Waline                                                              |                                    |
+| ----------------------------------------------- | ------------------------------------------------------------------- | ---------------------------------- |
+| **Client**                                      | **Server**                                                          | **Storage**                        |
+| [@waline/client](https://waline.js.org)         | [Vercel](https://vercel.com)                                        | [LeanCloud](https://leancloud.app) |
+| [MiniValine](https://minivaline.js.org/)        | [CloudBase](https://cloudbase.net/)                                 | [CloudBase](https://cloudbase.net) |
+| [sodesu](https://github.com/BeiyanYunyi/sodesu) | [Railway](https://railway.app)                                      | [MongoDB](https://mongodb.com)     |
+|                                                 | [Render](https://render.com)                                        | MySQL                              |
+|                                                 | [Zeabur](https://zeabur.com)                                        | SQLite                             |
+|                                                 | [Netlify](https://netlify.com)                                      | PostgreSQL                         |
+|                                                 | [Alibaba Cloud ComputeNest](https://computenest.console.aliyun.com) | SQLite                             |
+|                                                 | Docker                                                              | [GitHub](https://github.com)       |
+|                                                 | self host                                                           | [TiDB](https://tidbcloud.com/)     |
 
 ## Todo
 
@@ -39,10 +40,12 @@ A simple comment system with backend support fork from [Valine](https://valine.j
 - [x] Wechat notification
 - [x] Telegram notification
 - [x] Akismet
-- [x] Article counter
 - [x] i18n
 - [x] Custom language
+- [x] Pageviews
+- [x] Article reaction
 - [x] Login support
+- [x] User label
 - [x] Comment management
 - [x] Support delete comment
 - [x] More database support
@@ -52,8 +55,8 @@ A simple comment system with backend support fork from [Valine](https://valine.j
 - [x] Duplicate content check
 - [x] CloudBase deploy support
 - [x] Social account login
-- [x] Sitcky Comment
+- [x] Sticky Comment
+- [x] Comment Like
 - [ ] AWS, GCP, Azure deploy support
-- [ ] Comment Like
 
 We **really** welcome you to contribute to waline!

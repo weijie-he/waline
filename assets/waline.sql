@@ -15,20 +15,28 @@ CREATE TABLE `wl_Comment` (
   `id` int(11) unsigned NOT NULL AUTO_INCREMENT,
   `user_id` int(11) DEFAULT NULL,
   `comment` text,
-  `insertedAt` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `insertedAt` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
   `ip` varchar(100) DEFAULT '',
   `link` varchar(255) DEFAULT NULL,
   `mail` varchar(255) DEFAULT NULL,
   `nick` varchar(255) DEFAULT NULL,
   `pid` int(11) DEFAULT NULL,
   `rid` int(11) DEFAULT NULL,
-  `sticky` int(11) DEFAULT NULL,
+  `sticky` boolean DEFAULT NULL,
   `status` varchar(50) NOT NULL DEFAULT '',
+  `like` int(11) DEFAULT NULL,
   `ua` text,
   `url` varchar(255) DEFAULT NULL,
   `createdAt` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
   `updatedAt` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`)
+  ADD INDEX `idx_comment_url` (`url`),
+  ADD INDEX `idx_comment_user_id` (`user_id`),
+  ADD INDEX `idx_comment_status` (`status`),
+  ADD INDEX `idx_comment_pid_rid` (`pid`, `rid`),
+  ADD INDEX `idx_comment_created_at` (`createdAt`),
+  ADD INDEX `idx_comment_updated_at` (`updatedAt`),
+  ADD INDEX `idx_comment_sticky` (`sticky`);
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 
@@ -39,10 +47,22 @@ CREATE TABLE `wl_Comment` (
 CREATE TABLE `wl_Counter` (
   `id` int(11) unsigned NOT NULL AUTO_INCREMENT,
   `time` int(11) DEFAULT NULL,
+  `reaction0` int(11) DEFAULT NULL,
+  `reaction1` int(11) DEFAULT NULL,
+  `reaction2` int(11) DEFAULT NULL,
+  `reaction3` int(11) DEFAULT NULL,
+  `reaction4` int(11) DEFAULT NULL,
+  `reaction5` int(11) DEFAULT NULL,
+  `reaction6` int(11) DEFAULT NULL,
+  `reaction7` int(11) DEFAULT NULL,
+  `reaction8` int(11) DEFAULT NULL,
   `url` varchar(255) NOT NULL DEFAULT '',
   `createdAt` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
   `updatedAt` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`)
+  ADD INDEX `idx_counter_url` (`url`),
+  ADD INDEX `idx_counter_time` (`time`),
+  ADD INDEX `idx_counter_created_at` (`createdAt`);
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 
@@ -56,6 +76,7 @@ CREATE TABLE `wl_Users` (
   `email` varchar(255) NOT NULL DEFAULT '',
   `password` varchar(255) NOT NULL DEFAULT '',
   `type` varchar(50) NOT NULL DEFAULT '',
+  `label` varchar(255) DEFAULT NULL,
   `url` varchar(255) DEFAULT NULL,
   `avatar` varchar(255) DEFAULT NULL,
   `github` varchar(255) DEFAULT NULL,
@@ -64,9 +85,13 @@ CREATE TABLE `wl_Users` (
   `google` varchar(255) DEFAULT NULL,
   `weibo` varchar(255) DEFAULT NULL,
   `qq` varchar(255) DEFAULT NULL,
+  `2fa` varchar(32) DEFAULT NULL,
   `createdAt` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
   `updatedAt` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`)
+  ADD UNIQUE INDEX `idx_user_email` (`email`),
+  ADD INDEX `idx_user_type` (`type`),
+  ADD INDEX `idx_user_created_at` (`createdAt`);
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 

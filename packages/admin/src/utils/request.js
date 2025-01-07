@@ -1,3 +1,5 @@
+import I18n from 'i18next';
+
 export default async function request(url, opts = {}) {
   if (typeof url === 'object') {
     opts = url;
@@ -14,6 +16,7 @@ export default async function request(url, opts = {}) {
   }
 
   let token = window.TOKEN || sessionStorage.getItem('TOKEN');
+
   if (!token) {
     token = localStorage.getItem('TOKEN');
   }
@@ -22,28 +25,42 @@ export default async function request(url, opts = {}) {
   }
 
   let baseUrl = window.serverURL;
+
   if (!baseUrl) {
     const match = location.pathname.match(/(.*?\/)ui/);
+
     baseUrl = match ? match[1] : '/';
   }
 
-  return fetch(baseUrl + opts.url, opts)
-    .then((resp) => {
-      if (resp.ok) {
-        return resp.json();
-      }
+  const joiner = opts.url.includes('?') ? '&' : '?';
+  const resp = await fetch(
+    `${baseUrl}${opts.url}${joiner}lang=${I18n.language}`,
+    opts,
+  );
 
-      if (resp.status === 401) {
-        throw new Error(401);
-      }
+  if (!resp.ok) {
+    if (resp.status === 401) {
+      throw new Error(401);
+    }
 
-      throw new Error(`${resp.status}: ${resp.statusText}`);
-    })
-    .then((resp) => {
-      if (resp.errno !== 0) {
-        throw new Error(resp.errmsg);
-      }
+    let result;
 
-      return resp.data;
-    });
+    try {
+      result = await resp.json();
+    } catch {
+      // ignore
+    }
+
+    throw new Error(`${resp.status}: ${result?.errmsg || resp.statusText}`);
+  }
+
+  const result = await resp.json();
+
+  if (result.errno !== 0) {
+    throw new Error(result.errmsg);
+  }
+
+  const __version = resp.headers.get('x-waline-version');
+
+  return { __version, ...result.data };
 }

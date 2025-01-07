@@ -1,4 +1,4 @@
-import { generateLocale } from './generate';
+import { generateLocale } from './generate.js';
 
 export default generateLocale([
   'ニックネーム',
@@ -10,6 +10,8 @@ export default generateLocale([
   'ここにコメント',
   'コメントしましょう~',
   '提出する',
+  'Like',
+  'Cancel like',
   '返信する',
   'キャンセル',
   'コメント',
@@ -31,4 +33,21 @@ export default generateLocale([
   'ワード',
   'コメントは $0 から $1 ワードの間でなければなりません!\n 現在の単語番号: $2',
   '匿名',
+  'うえにん',
+  'なかにん',
+  'しもおし',
+  '特にしもおし',
+  'かげ',
+  'なぬし',
+  'GIF',
+  '探す GIF',
+  '個人情報',
+  '承認済み',
+  '待っている',
+  'スパム',
+  'べたつかない',
+  '逆順',
+  '正順',
+  '人気順',
+  'どう思いますか？',
 ]);

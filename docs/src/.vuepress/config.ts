@@ -1,47 +1,42 @@
-import { path } from '@vuepress/utils';
-import { defineHopeConfig } from 'vuepress-theme-hope';
-import themeConfig from './themeConfig';
+import { viteBundler } from '@vuepress/bundler-vite';
+import { defineUserConfig } from 'vuepress';
+import { path } from 'vuepress/utils';
 
-export default defineHopeConfig({
-  head: [
-    [
-      'link',
-      {
-        rel: 'stylesheet',
-        href: '//at.alicdn.com/t/font_3180165_jfis4tj8ej.css',
-      },
-    ],
-  ],
+import theme from './theme.js';
 
+export default defineUserConfig({
   locales: {
     '/': {
       lang: 'zh-CN',
       title: 'Waline',
-      description: '一款基于 Valine 衍生的简洁、安全的评论系统。',
+      description: '一款简洁、安全的评论系统。',
     },
     '/en/': {
       lang: 'en-US',
       title: 'Waline',
-      description: 'A Simple Comment System inspired by Valine.',
+      description: 'A Simple, Safe Comment System.',
     },
   },
 
+  bundler: viteBundler({
+    viteOptions: {
+      ssr: {
+        noExternal: ['@fancyapps/ui'],
+      },
+    },
+  }),
+
+  theme,
+
   alias: {
+    '@MigrationTool': path.resolve(__dirname, './components/MigrationTool.vue'),
     '@theme-hope/components/HomePage': path.resolve(
       __dirname,
-      './components/HomePage'
+      './components/HomePage',
     ),
     '@theme-hope/components/NormalPage': path.resolve(
       __dirname,
-      './components/NormalPage'
+      './components/NormalPage',
     ),
   },
-
-  markdown: {
-    code: {
-      lineNumbers: false,
-    },
-  },
-
-  themeConfig,
 });

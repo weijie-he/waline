@@ -1,11 +1,12 @@
+const { katex: katexPlugin } = require('@mdit/plugin-katex');
+const { sub: subPlugin } = require('@mdit/plugin-sub');
+const { sup: supPlugin } = require('@mdit/plugin-sup');
 const MarkdownIt = require('markdown-it');
 const emojiPlugin = require('markdown-it-emoji');
-const subPlugin = require('markdown-it-sub');
-const supPlugin = require('markdown-it-sup');
-const { katexPlugin } = require('./katex');
-const { mathjaxPlugin } = require('./mathjax');
-const { resolveHighlighter } = require('./highlight');
-const { sanitize } = require('./xss');
+
+const { resolveHighlighter } = require('./highlight.js');
+const { mathjaxPlugin } = require('./mathjax.js');
+const { sanitize } = require('./xss.js');
 
 const getMarkdownParser = () => {
   const { markdown = {} } = think.config();
@@ -14,7 +15,7 @@ const getMarkdownParser = () => {
   // markdown-it instance
   const markdownIt = MarkdownIt({
     breaks: true,
-    linkify: true, // Autoconvert URL-like text to links
+    linkify: true, // Auto convert URL-like text to links
     typographer: true, // Enable some language-neutral replacement + quotes beautification
 
     // default highlight
@@ -34,7 +35,7 @@ const getMarkdownParser = () => {
 
   // parse emoji
   if (emoji !== false) {
-    markdownIt.use(emojiPlugin, typeof emoji === 'object' ? emoji : {});
+    markdownIt.use(emojiPlugin.full, typeof emoji === 'object' ? emoji : {});
   }
 
   // parse sub

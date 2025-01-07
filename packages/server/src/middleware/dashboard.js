@@ -12,8 +12,13 @@ module.exports = function () {
     <script>
     window.SITE_URL = ${JSON.stringify(process.env.SITE_URL)};
     window.SITE_NAME = ${JSON.stringify(process.env.SITE_NAME)};
+    window.recaptchaV3Key = ${JSON.stringify(process.env.RECAPTCHA_V3_KEY)};
+    window.turnstileKey = ${JSON.stringify(process.env.TURNSTILE_KEY)};
+    window.serverURL = '${ctx.serverURL}/api/';
     </script>
-    <script src="https://cdn.jsdelivr.net/npm/@waline/admin"></script>
+    <script src="${
+      process.env.WALINE_ADMIN_MODULE_ASSET_URL || '//unpkg.com/@waline/admin'
+    }"></script>
   </body>
 </html>`;
   };

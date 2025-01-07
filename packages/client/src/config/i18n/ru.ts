@@ -1,4 +1,4 @@
-import { generateLocale } from './generate';
+import { generateLocale } from './generate.js';
 
 export default generateLocale([
   'Псевдоним',
@@ -10,6 +10,8 @@ export default generateLocale([
   'Комментарий здесь...',
   'Пока нет комментариев.',
   'Отправить',
+  'Like',
+  'Cancel like',
   'Отвечать',
   'Отменить ответ',
   'Комментарии',
@@ -31,4 +33,21 @@ export default generateLocale([
   'Слова',
   'Пожалуйста, введите комментарии от $0 до $1 слов!\nНомер текущего слова: $2',
   'Анонимный',
+  'Dwarves',
+  'Hobbits',
+  'Ents',
+  'Wizards',
+  'Elves',
+  'Maiar',
+  'GIF',
+  'Поиск GIF',
+  'Персональные данные',
+  'Одобренный',
+  'Ожидающий',
+  'Спам',
+  'Нелипкий',
+  'самый старый',
+  'последний',
+  'самый горячий',
+  'Что вы думаете?',
 ]);
